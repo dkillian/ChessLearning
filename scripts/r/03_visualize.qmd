@@ -1,0 +1,460 @@
+---
+title: "Chess Learning — Weight Trajectories & Learning Analysis"
+subtitle: "Stage 03 Visualization"
+author: "Posit AI, under guidance from Dan Killian"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    code-fold: true
+    theme: cosmo
+    fig-height: 4
+    fig-length: 6
+execute:
+  warning: false
+  message: false
+---
+
+```{r global_options, include=F, warning=F, message=F, echo=F, error=F, fig.height=3, fig.width=5}
+library(here)
+library(knitr)
+library(DBI)
+library(RSQLite)
+source("../../../prep (May 2025).r")
+theme_set(base_quarto)
+```
+
+
+```{r setup}
+# Path to database — works when rendered from scripts/r/ or run interactively
+DB_PATH <- if (file.exists("../../data/chess_learning.db")) {
+  "../../data/chess_learning.db"
+} else {
+  "data/chess_learning.db"  # fallback for interactive use from project root
+}
+
+# Feature groupings for organised display
+MATERIAL_FEATURES    <- c("material_queen", "material_rook", "material_bishop",
+                           "material_knight", "material_pawn")
+PAWN_FEATURES        <- c("passed_pawn", "doubled_pawn", "isolated_pawn")
+POSITIONAL_FEATURES  <- c("king_safety", "center_control", "rook_open_file", "connected_rooks")
+
+FEATURE_ORDER <- c(MATERIAL_FEATURES, PAWN_FEATURES, POSITIONAL_FEATURES)
+
+FEATURE_GROUP <- tibble(
+  feature_name = FEATURE_ORDER,
+  group = c(
+    rep("Material", length(MATERIAL_FEATURES)),
+    rep("Pawn structure", length(PAWN_FEATURES)),
+    rep("Positional", length(POSITIONAL_FEATURES))
+  )
+)
+
+# Canonical piece values (for reference lines)
+CANONICAL <- tibble(
+  feature_name  = MATERIAL_FEATURES,
+  canonical_val = c(9, 5, 3, 3, 1)
+)
+
+# Outcome → numeric from white's perspective
+outcome_numeric <- function(outcome) {
+  case_when(
+    outcome == "1-0"     ~  1,
+    outcome == "0-1"     ~ -1,
+    outcome == "1/2-1/2" ~  0,
+    .default = NA_real_
+  )
+}
+
+# Rolling correlation helper (no extra dependencies needed)
+roll_cor <- function(x, y, window = 100) {
+  n <- length(x)
+  map_dbl(seq_len(n), function(i) {
+    if (i < window) return(NA_real_)
+    cor(x[(i - window + 1):i], y[(i - window + 1):i], use = "complete.obs")
+  })
+}
+
+# Connect and load tables
+con    <- dbConnect(SQLite(), DB_PATH)
+runs   <- dbReadTable(con, "runs")
+games  <- dbReadTable(con, "games")
+
+# Deduplicate weights: keep the last-written row per (run_id, game_number, feature_name)
+weights <- dbGetQuery(con,
+  "SELECT run_id, game_number, feature_name, weight_value
+   FROM weights
+   GROUP BY run_id, game_number, feature_name
+   HAVING rowid = MAX(rowid)"
+)
+
+has_feature_stats  <- dbExistsTable(con, "feature_stats")
+has_game_records   <- dbExistsTable(con, "game_records")
+has_weight_deltas  <- dbExistsTable(con, "weight_deltas")
+
+feature_stats <- if (has_feature_stats) dbReadTable(con, "feature_stats") else NULL
+game_records  <- if (has_game_records)  dbReadTable(con, "game_records")  else NULL
+weight_deltas <- if (has_weight_deltas) dbReadTable(con, "weight_deltas") else NULL
+dbDisconnect(con)
+
+# Available run IDs
+run_ids <- sort(unique(games$run_id))
+cat("Runs in database:", paste(run_ids, collapse = ", "), "\n")
+cat("Games per run:\n")
+games |> count(run_id) |> print()
+```
+
+## Weight Trajectories
+
+How each feature weight evolves over the course of training.
+Features are grouped by type. Weights start near zero and should drift
+toward values that reflect the true importance of each chess concept.
+
+```{r weight-trajectories}
+weights_tidy <- weights |>
+  left_join(FEATURE_GROUP, by = "feature_name") |>
+  mutate(
+    feature_name = factor(feature_name, levels = FEATURE_ORDER),
+    group        = factor(group, levels = c("Material", "Pawn structure", "Positional"))
+  )
+
+# One plot per group so y-scales can breathe
+plot_weight_group <- function(grp) {
+  weights_tidy |>
+    filter(group == grp) |>
+    ggplot(aes(x = game_number, y = weight_value, colour = feature_name)) +
+    geom_line(linewidth = 0.8) +
+    geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
+    facet_wrap(~ run_id, labeller = label_both, scales = "free_x") +
+    labs(
+      title    = paste(grp, "weights over training"),
+      x        = "Game number",
+      y        = "Weight value",
+      colour   = NULL
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(legend.position = "bottom")
+}
+
+plot_weight_group("Material")
+plot_weight_group("Pawn structure")
+plot_weight_group("Positional")
+```
+
+### Material weights vs canonical values
+
+Canonical piece values (queen=9, rook=5, bishop=3, knight=3, pawn=1) normalised to
+pawn=1. This panel shows whether the *relative* ordering of material weights is
+converging toward the accepted hierarchy.
+
+```{r material-vs-canonical}
+# Normalise weights within each run/checkpoint by dividing by the pawn weight
+# (only where pawn weight != 0, to avoid division by zero)
+weights |>
+  filter(feature_name %in% MATERIAL_FEATURES) |>
+  pivot_wider(names_from = feature_name, values_from = weight_value) |>
+  filter(!is.na(material_pawn), material_pawn != 0) |>
+  mutate(across(all_of(MATERIAL_FEATURES), ~ . / abs(material_pawn))) |>
+  pivot_longer(all_of(MATERIAL_FEATURES),
+               names_to = "feature_name", values_to = "normalised_weight") |>
+  left_join(CANONICAL, by = "feature_name") |>
+  ggplot(aes(x = game_number, y = normalised_weight, colour = feature_name)) +
+  geom_line(linewidth = 0.8) +
+  geom_hline(
+    data = CANONICAL,
+    aes(yintercept = canonical_val, colour = feature_name),
+    linetype = "dotted", linewidth = 0.6
+  ) +
+  facet_wrap(~ run_id, labeller = label_both, scales = "free_x") +
+  labs(
+    title    = "Material weights normalised to pawn (dotted = canonical value)",
+    x        = "Game number",
+    y        = "Weight relative to |pawn weight|",
+    colour   = NULL
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+## Game Statistics
+
+How the character of games changes as the engine learns.
+
+```{r game-stats}
+games_clean <- games |>
+  mutate(outcome_label = case_when(
+    outcome == "1-0"     ~ "White wins",
+    outcome == "0-1"     ~ "Black wins",
+    outcome == "1/2-1/2" ~ "Draw",
+    .default = "Other"
+  ))
+
+# Rolling window size (in games)
+WIN <- 50
+
+games_rolling <- games_clean |>
+  arrange(run_id, game_number) |>
+  group_by(run_id) |>
+  mutate(
+    white_win  = (outcome == "1-0"),
+    black_win  = (outcome == "0-1"),
+    draw       = (outcome == "1/2-1/2"),
+    decisive   = white_win | black_win,
+    roll_white = slider::slide_dbl(white_win, mean, .before = WIN - 1, .complete = FALSE),
+    roll_draw  = slider::slide_dbl(draw,      mean, .before = WIN - 1, .complete = FALSE),
+    roll_len   = slider::slide_dbl(n_halfmoves, mean, .before = WIN - 1, .complete = FALSE)
+  ) |>
+  ungroup()
+```
+
+```{r outcome-rates, fig.height=4}
+games_rolling |>
+  select(run_id, game_number, roll_white, roll_draw) |>
+  pivot_longer(c(roll_white, roll_draw),
+               names_to = "series", values_to = "rate") |>
+  mutate(series = if_else(series == "roll_white", "White win rate", "Draw rate")) |>
+  ggplot(aes(x = game_number, y = rate, colour = series)) +
+  geom_line(linewidth = 0.8) +
+  facet_wrap(~ run_id, labeller = label_both, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(
+    title  = paste0("Rolling outcome rates (", WIN, "-game window)"),
+    x      = "Game number",
+    y      = "Rate",
+    colour = NULL
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+```{r game-length, fig.height=4}
+games_rolling |>
+  ggplot(aes(x = game_number, y = roll_len)) +
+  geom_line(colour = "steelblue", linewidth = 0.8) +
+  facet_wrap(~ run_id, labeller = label_both, scales = "free_x") +
+  labs(
+    title = paste0("Rolling average game length (", WIN, "-game window)"),
+    x     = "Game number",
+    y     = "Half-moves per game"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+```{r termination-type, fig.height=4}
+games_clean |>
+  count(run_id, terminated_by) |>
+  group_by(run_id) |>
+  mutate(pct = n / sum(n)) |>
+  ungroup() |>
+  ggplot(aes(x = terminated_by, y = pct, fill = terminated_by)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = scales::percent(pct, accuracy = 1)), vjust = -0.3, size = 3.5) +
+  facet_wrap(~ run_id, labeller = label_both) +
+  scale_y_continuous(labels = scales::percent_format(), limits = c(0, 1)) +
+  labs(
+    title = "Game termination type by run",
+    x     = NULL,
+    y     = "Share of games"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+## Most Impactful Games
+
+Which individual games drove the largest weight change for a given feature?
+Because temporal difference learning updates weights after every game, some games — depending on their
+outcome, length, and the positions reached — produce outsized shifts. Identifying these
+games lets you examine the actual play that taught the engine a concept.
+
+Set `FOCUS_FEATURE` and `TOP_N` to explore any feature.
+
+```{r impactful-games-setup}
+FOCUS_FEATURE <- "material_queen"   # feature to examine
+TOP_N         <- 10                 # number of top games to surface
+```
+
+```{r impactful-games-table}
+if (!has_game_records || !has_weight_deltas) {
+  cat(
+    "game_records and weight_deltas tables not yet populated.\n",
+    "Run selfplay.ipynb (updated version) to generate this data.\n"
+  )
+} else {
+  top_games <- weight_deltas |>
+    filter(feature_name == FOCUS_FEATURE) |>
+    mutate(abs_delta = abs(delta)) |>
+    arrange(desc(abs_delta)) |>
+    slice_head(n = TOP_N) |>
+    left_join(
+      game_records |> select(run_id, game_number, pgn, td_error),
+      by = c("run_id", "game_number")
+    ) |>
+    left_join(
+      games |> select(run_id, game_number, outcome, n_halfmoves),
+      by = c("run_id", "game_number")
+    ) |>
+    mutate(
+      # Extract the move text from PGN (everything after the blank line separator)
+      moves = map_chr(pgn, \(p) {
+        parts <- str_split(p, "\n\n")[[1]]
+        tail(parts, 1) |> str_squish() |> str_trunc(80)
+      })
+    ) |>
+    select(run_id, game_number, outcome, n_halfmoves, delta, td_error, moves)
+
+  top_games |>
+    mutate(across(where(is.double), ~ round(., 4))) |>
+    knitr::kable(
+      col.names = c(
+        "Run", "Game", "Outcome", "Half-moves",
+        paste0("\u0394 ", FOCUS_FEATURE), "TD error", "Moves (truncated)"
+      ),
+      caption = paste0("Top ", TOP_N, " games by |\u0394 ", FOCUS_FEATURE, "|")
+    )
+}
+```
+
+```{r impactful-games-plot, fig.height=4}
+if (has_game_records && has_weight_deltas) {
+  delta_series <- weight_deltas |>
+    filter(feature_name == FOCUS_FEATURE) |>
+    left_join(
+      games |> select(run_id, game_number, outcome),
+      by = c("run_id", "game_number")
+    ) |>
+    mutate(is_top = game_number %in% top_games$game_number)
+
+  ggplot(delta_series, aes(x = game_number, y = delta)) +
+    geom_line(colour = "grey75", linewidth = 0.4) +
+    geom_point(
+      data    = filter(delta_series, is_top),
+      aes(colour = outcome),
+      size    = 2.5
+    ) +
+    geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
+    facet_wrap(~ run_id, labeller = label_both, scales = "free_x") +
+    labs(
+      title   = paste0("Per-game weight delta: ", FOCUS_FEATURE),
+      subtitle = paste0("Top ", TOP_N, " most impactful games highlighted"),
+      x       = "Game number",
+      y       = paste0("\u0394 weight"),
+      colour  = "Outcome"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(legend.position = "bottom")
+}
+```
+
+## Feature-Outcome Correlation
+
+For each feature, does its average value during a game predict whether white wins?
+A positive correlation means: higher average feature value (from white's perspective)
+is associated with white winning.
+
+This is the primary tool for testing the **pawn U-curve hypothesis**: if the pawn
+feature-outcome correlation dips negative during the phase when queen weights are
+rising, and then recovers, that is evidence of a structural learning sequence rather
+than noise.
+
+```{r feature-outcome-correlation}
+if (!has_feature_stats || nrow(feature_stats) == 0) {
+  cat("No feature_stats data yet. Run a full training run with the updated selfplay.ipynb",
+      "to populate this table.\n")
+} else {
+  ROLL_WIN <- 200  # rolling window for correlation
+
+  corr_data <- feature_stats |>
+    left_join(FEATURE_GROUP, by = "feature_name") |>
+    mutate(
+      outcome_num  = outcome_numeric(outcome),
+      feature_name = factor(feature_name, levels = FEATURE_ORDER),
+      group        = factor(group, levels = c("Material", "Pawn structure", "Positional"))
+    ) |>
+    arrange(run_id, feature_name, game_number) |>
+    group_by(run_id, feature_name, group) |>
+    mutate(
+      roll_corr = roll_cor(mean_value, outcome_num, window = ROLL_WIN)
+    ) |>
+    ungroup()
+
+  corr_data |>
+    ggplot(aes(x = game_number, y = roll_corr, colour = feature_name)) +
+    geom_line(linewidth = 0.7) +
+    geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
+    facet_grid(group ~ run_id, scales = "free_x") +
+    labs(
+      title    = paste0("Rolling feature-outcome correlation (", ROLL_WIN, "-game window)"),
+      subtitle = "Positive = higher feature value predicts white wins",
+      x        = "Game number",
+      y        = "Correlation with outcome",
+      colour   = NULL
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(legend.position = "bottom")
+}
+```
+
+## Cross-Run Comparison
+
+Concept emergence timing across independent runs — the central research question.
+A concept is considered "emerged" when its weight or feature-outcome correlation
+crosses a defined threshold.
+
+```{r concept-emergence}
+# Weight-based emergence: first game where weight_value > threshold
+EMERGENCE_THRESHOLD <- 0.1
+
+emergence <- weights |>
+  left_join(FEATURE_GROUP, by = "feature_name") |>
+  filter(weight_value > EMERGENCE_THRESHOLD) |>
+  group_by(run_id, feature_name, group) |>
+  summarise(emerged_at = min(game_number), .groups = "drop") |>
+  mutate(
+    feature_name = factor(feature_name, levels = FEATURE_ORDER),
+    group        = factor(group, levels = c("Material", "Pawn structure", "Positional"))
+  )
+
+if (nrow(emergence) == 0) {
+  cat("No features have yet crossed the emergence threshold (", EMERGENCE_THRESHOLD, ").\n",
+      "Run more training games.\n")
+} else {
+  emergence |>
+    ggplot(aes(x = emerged_at, y = feature_name, colour = factor(run_id))) +
+    geom_point(size = 3) +
+    facet_wrap(~ group, scales = "free_y", ncol = 1) +
+    labs(
+      title    = paste0("Concept emergence (weight > ", EMERGENCE_THRESHOLD, ")"),
+      subtitle = "Each dot = first checkpoint where weight crossed threshold",
+      x        = "Game number",
+      y        = NULL,
+      colour   = "Run"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(legend.position = "bottom")
+}
+```
+
+## Final Weights Summary
+
+Snapshot of weights at the end of each run.
+
+```{r final-weights-table}
+weights |>
+  group_by(run_id) |>
+  filter(game_number == max(game_number)) |>
+  ungroup() |>
+  left_join(FEATURE_GROUP, by = "feature_name") |>
+  left_join(CANONICAL, by = "feature_name") |>
+  mutate(
+    feature_name = factor(feature_name, levels = FEATURE_ORDER),
+    group        = factor(group, levels = c("Material", "Pawn structure", "Positional"))
+  ) |>
+  arrange(run_id, group, feature_name) |>
+  select(run_id, group, feature_name, weight_value, canonical_val) |>
+  mutate(across(where(is.numeric), ~ round(., 4))) |>
+  knitr::kable(
+    col.names = c("Run", "Group", "Feature", "Final weight", "Canonical"),
+    caption   = "Final weights vs canonical piece values (material features only)"
+  )
+```
