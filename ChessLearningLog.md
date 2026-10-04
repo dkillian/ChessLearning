@@ -158,3 +158,59 @@
 2. Re-render 03_visualize.qmd to see full weight trajectories and feature-outcome correlations
 3. Examine pawn weight trajectory specifically for U-curve pattern
 4. Calibrate emergence threshold based on observed weight magnitudes
+
+---
+
+## Session 4 — October 3, 2026
+
+### What We Worked On
+
+- Reviewed activity documentation and confirmed tranche-based training approach
+- Added 5 new features to `engine.py`: `bishop_pair`, `rook_seventh`, `piece_development`,
+  `mobility`, `pawn_advancement` (17 features total, 4 groups)
+- Rewrote `03_visualize.qmd`: 4 feature groups, flextable tables, multi-feature delta plot
+- Created `04_game_viewer.R`: Shiny app for stepping through impactful games move by move
+  (uses reticulate + python-chess SVG rendering, prev/next navigation, move list highlighting)
+- Started run_id = 2 with three tranches: 50 + 200 + 500 = 750 games total
+- Fixed two bugs: `log_run` schema mismatch (runs table had 7 cols, INSERT used 6);
+  `huxtable::set_caption` masking `flextable::set_caption` — fixed with explicit namespace
+
+### What Was Decided
+
+- Tranche-based training (not full 10-hour runs): run → inspect → continue
+- New run (run_id = 2) rather than continuing run_id = 1, for consistent checkpoint
+  granularity and complete `feature_stats` coverage from game 1
+- `selfplay.ipynb` config: `N_GAMES = 500`, `RESUME = True` (left after last tranche)
+
+### Key Finding: Draw Equilibrium
+
+- 750 games: 747 draws, 3 black wins (all in games 1–10), 0 white wins
+- All learning came from the 3 early decisive games; 740+ straight draws produced
+  near-zero weight updates
+- **Material weights frozen from game 10**: in draw positions, material is balanced
+  (us − them ≈ 0), so the TD gradient for material features is ~0 regardless of error
+- **`mobility` eroded to ~0**: has non-zero values in balanced draw positions, so
+  draw target of 0 slowly pulls it toward zero
+- The engine is stuck in a draw equilibrium: near-zero weights → random play →
+  mostly draws → near-zero gradient → weights don't develop
+
+### Risks & Uncertainties
+
+- Root cause of draw equilibrium: the 50-move rule + 3-fold repetition claim
+  (`board.can_claim_draw()`) causes random play to draw almost universally
+- Decisive game frequency has not increased with more training (still ~0.4%)
+- Whether this equilibrium can be broken without changing architecture is unknown
+
+### Steps for Next Session
+
+Choose one (or more) of these interventions to break the draw equilibrium:
+
+1. **Higher learning rate** (0.01 vs 0.001) — amplify signal from decisive games;
+   risk: draw erosion also amplifies
+2. **Disable draw claims** — force games to play out to natural conclusion;
+   risk: games get much longer, throughput drops
+3. **Epsilon-greedy exploration** — random move with probability ε to break
+   repetitive patterns and generate decisive outcomes
+4. **Warm-start weights** — initialize material weights at canonical values
+   (queen=9, rook=5, bishop=3, knight=3, pawn=1); engine plays purposefully
+   from game 1, and we observe positional concept learning on top of correct material
