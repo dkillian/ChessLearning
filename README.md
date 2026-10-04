@@ -24,6 +24,10 @@ documenting and visualizing the **progression of chess concept acquisition** ove
 
 ---
 
+## Scripts
+
+[Temporal difference learning - Tutorial](https://dkillian.github.io/ChessLearning/scripts/r/td_tutorial.html)
+
 ## Architecture
 
 ```

@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 <meta name="author" content="Posit AI, under guidance from Dan Killian">
-<meta name="dcterms.date" content="2026-09-29">
+<meta name="dcterms.date" content="2026-10-03">
 
 <title>Chess Learning — Weight Trajectories &amp; Learning Analysis</title>
 <style>
@@ -74,6 +74,10 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <script src="03_visualize_files/libs/bootstrap/bootstrap.min.js"></script>
 <link href="03_visualize_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
 <link href="03_visualize_files/libs/bootstrap/bootstrap-67270d1595a62d14f123c043d4fb2f18.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="03_visualize_files/libs/tabwid-1.1.3/tabwid.css" rel="stylesheet">
+
+<script src="03_visualize_files/libs/tabwid-1.1.3/tabwid.js"></script>
+
 
 
 </head>
@@ -117,7 +121,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
     <div>
     <div class="quarto-title-meta-heading">Published</div>
     <div class="quarto-title-meta-contents">
-      <p class="date">September 29, 2026</p>
+      <p class="date">October 3, 2026</p>
     </div>
   </div>
   
@@ -136,92 +140,92 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>DB_PATH <span class="ot">&lt;-</span> <span class="cf">if</span> (<span class="fu">file.exists</span>(<span class="st">"../../data/chess_learning.db"</span>)) {</span>
 <span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>  <span class="st">"../../data/chess_learning.db"</span></span>
 <span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>  <span class="st">"data/chess_learning.db"</span>  <span class="co"># fallback for interactive use from project root</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>  <span class="st">"data/chess_learning.db"</span></span>
 <span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>}</span>
 <span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="co"># Feature groupings for organised display</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="co"># Feature groupings — 17 features across 4 groups</span></span>
 <span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>MATERIAL_FEATURES    <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"material_queen"</span>, <span class="st">"material_rook"</span>, <span class="st">"material_bishop"</span>,</span>
 <span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>                           <span class="st">"material_knight"</span>, <span class="st">"material_pawn"</span>)</span>
-<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>PAWN_FEATURES        <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"passed_pawn"</span>, <span class="st">"doubled_pawn"</span>, <span class="st">"isolated_pawn"</span>)</span>
-<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>POSITIONAL_FEATURES  <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"king_safety"</span>, <span class="st">"center_control"</span>, <span class="st">"rook_open_file"</span>, <span class="st">"connected_rooks"</span>)</span>
-<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>FEATURE_ORDER <span class="ot">&lt;-</span> <span class="fu">c</span>(MATERIAL_FEATURES, PAWN_FEATURES, POSITIONAL_FEATURES)</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>PAWN_FEATURES        <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"passed_pawn"</span>, <span class="st">"doubled_pawn"</span>, <span class="st">"isolated_pawn"</span>, <span class="st">"pawn_advancement"</span>)</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>POSITIONAL_FEATURES  <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"king_safety"</span>, <span class="st">"center_control"</span>, <span class="st">"rook_open_file"</span>,</span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>                           <span class="st">"connected_rooks"</span>, <span class="st">"rook_seventh"</span>)</span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>DEVELOPMENT_FEATURES <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"bishop_pair"</span>, <span class="st">"piece_development"</span>, <span class="st">"mobility"</span>)</span>
 <span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>FEATURE_GROUP <span class="ot">&lt;-</span> <span class="fu">tibble</span>(</span>
-<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a>  <span class="at">feature_name =</span> FEATURE_ORDER,</span>
-<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a>  <span class="at">group =</span> <span class="fu">c</span>(</span>
-<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">rep</span>(<span class="st">"Material"</span>, <span class="fu">length</span>(MATERIAL_FEATURES)),</span>
-<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a>    <span class="fu">rep</span>(<span class="st">"Pawn structure"</span>, <span class="fu">length</span>(PAWN_FEATURES)),</span>
-<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a>    <span class="fu">rep</span>(<span class="st">"Positional"</span>, <span class="fu">length</span>(POSITIONAL_FEATURES))</span>
-<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb1-23"><a href="#cb1-23" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb1-24"><a href="#cb1-24" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-25"><a href="#cb1-25" aria-hidden="true" tabindex="-1"></a><span class="co"># Canonical piece values (for reference lines)</span></span>
-<span id="cb1-26"><a href="#cb1-26" aria-hidden="true" tabindex="-1"></a>CANONICAL <span class="ot">&lt;-</span> <span class="fu">tibble</span>(</span>
-<span id="cb1-27"><a href="#cb1-27" aria-hidden="true" tabindex="-1"></a>  <span class="at">feature_name  =</span> MATERIAL_FEATURES,</span>
-<span id="cb1-28"><a href="#cb1-28" aria-hidden="true" tabindex="-1"></a>  <span class="at">canonical_val =</span> <span class="fu">c</span>(<span class="dv">9</span>, <span class="dv">5</span>, <span class="dv">3</span>, <span class="dv">3</span>, <span class="dv">1</span>)</span>
-<span id="cb1-29"><a href="#cb1-29" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb1-30"><a href="#cb1-30" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-31"><a href="#cb1-31" aria-hidden="true" tabindex="-1"></a><span class="co"># Outcome → numeric from white's perspective</span></span>
-<span id="cb1-32"><a href="#cb1-32" aria-hidden="true" tabindex="-1"></a>outcome_numeric <span class="ot">&lt;-</span> <span class="cf">function</span>(outcome) {</span>
-<span id="cb1-33"><a href="#cb1-33" aria-hidden="true" tabindex="-1"></a>  <span class="fu">case_when</span>(</span>
-<span id="cb1-34"><a href="#cb1-34" aria-hidden="true" tabindex="-1"></a>    outcome <span class="sc">==</span> <span class="st">"1-0"</span>     <span class="sc">~</span>  <span class="dv">1</span>,</span>
-<span id="cb1-35"><a href="#cb1-35" aria-hidden="true" tabindex="-1"></a>    outcome <span class="sc">==</span> <span class="st">"0-1"</span>     <span class="sc">~</span> <span class="sc">-</span><span class="dv">1</span>,</span>
-<span id="cb1-36"><a href="#cb1-36" aria-hidden="true" tabindex="-1"></a>    outcome <span class="sc">==</span> <span class="st">"1/2-1/2"</span> <span class="sc">~</span>  <span class="dv">0</span>,</span>
-<span id="cb1-37"><a href="#cb1-37" aria-hidden="true" tabindex="-1"></a>    <span class="at">.default =</span> <span class="cn">NA_real_</span></span>
-<span id="cb1-38"><a href="#cb1-38" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb1-39"><a href="#cb1-39" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb1-40"><a href="#cb1-40" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-41"><a href="#cb1-41" aria-hidden="true" tabindex="-1"></a><span class="co"># Rolling correlation helper (no extra dependencies needed)</span></span>
-<span id="cb1-42"><a href="#cb1-42" aria-hidden="true" tabindex="-1"></a>roll_cor <span class="ot">&lt;-</span> <span class="cf">function</span>(x, y, <span class="at">window =</span> <span class="dv">100</span>) {</span>
-<span id="cb1-43"><a href="#cb1-43" aria-hidden="true" tabindex="-1"></a>  n <span class="ot">&lt;-</span> <span class="fu">length</span>(x)</span>
-<span id="cb1-44"><a href="#cb1-44" aria-hidden="true" tabindex="-1"></a>  <span class="fu">map_dbl</span>(<span class="fu">seq_len</span>(n), <span class="cf">function</span>(i) {</span>
-<span id="cb1-45"><a href="#cb1-45" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (i <span class="sc">&lt;</span> window) <span class="fu">return</span>(<span class="cn">NA_real_</span>)</span>
-<span id="cb1-46"><a href="#cb1-46" aria-hidden="true" tabindex="-1"></a>    <span class="fu">cor</span>(x[(i <span class="sc">-</span> window <span class="sc">+</span> <span class="dv">1</span>)<span class="sc">:</span>i], y[(i <span class="sc">-</span> window <span class="sc">+</span> <span class="dv">1</span>)<span class="sc">:</span>i], <span class="at">use =</span> <span class="st">"complete.obs"</span>)</span>
-<span id="cb1-47"><a href="#cb1-47" aria-hidden="true" tabindex="-1"></a>  })</span>
-<span id="cb1-48"><a href="#cb1-48" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb1-49"><a href="#cb1-49" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-50"><a href="#cb1-50" aria-hidden="true" tabindex="-1"></a><span class="co"># Connect and load tables</span></span>
-<span id="cb1-51"><a href="#cb1-51" aria-hidden="true" tabindex="-1"></a>con    <span class="ot">&lt;-</span> <span class="fu">dbConnect</span>(<span class="fu">SQLite</span>(), DB_PATH)</span>
-<span id="cb1-52"><a href="#cb1-52" aria-hidden="true" tabindex="-1"></a>runs   <span class="ot">&lt;-</span> <span class="fu">dbReadTable</span>(con, <span class="st">"runs"</span>)</span>
-<span id="cb1-53"><a href="#cb1-53" aria-hidden="true" tabindex="-1"></a>games  <span class="ot">&lt;-</span> <span class="fu">dbReadTable</span>(con, <span class="st">"games"</span>)</span>
-<span id="cb1-54"><a href="#cb1-54" aria-hidden="true" tabindex="-1"></a><span class="co"># Deduplicate weights: keep the last-written row per (run_id, game_number, feature_name)</span></span>
-<span id="cb1-55"><a href="#cb1-55" aria-hidden="true" tabindex="-1"></a>weights <span class="ot">&lt;-</span> <span class="fu">dbGetQuery</span>(con,</span>
-<span id="cb1-56"><a href="#cb1-56" aria-hidden="true" tabindex="-1"></a>  <span class="st">"SELECT run_id, game_number, feature_name, weight_value</span></span>
-<span id="cb1-57"><a href="#cb1-57" aria-hidden="true" tabindex="-1"></a><span class="st">   FROM weights</span></span>
-<span id="cb1-58"><a href="#cb1-58" aria-hidden="true" tabindex="-1"></a><span class="st">   GROUP BY run_id, game_number, feature_name</span></span>
-<span id="cb1-59"><a href="#cb1-59" aria-hidden="true" tabindex="-1"></a><span class="st">   HAVING rowid = MAX(rowid)"</span></span>
-<span id="cb1-60"><a href="#cb1-60" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb1-61"><a href="#cb1-61" aria-hidden="true" tabindex="-1"></a>has_feature_stats  <span class="ot">&lt;-</span> <span class="fu">dbExistsTable</span>(con, <span class="st">"feature_stats"</span>)</span>
-<span id="cb1-62"><a href="#cb1-62" aria-hidden="true" tabindex="-1"></a>has_game_records   <span class="ot">&lt;-</span> <span class="fu">dbExistsTable</span>(con, <span class="st">"game_records"</span>)</span>
-<span id="cb1-63"><a href="#cb1-63" aria-hidden="true" tabindex="-1"></a>has_weight_deltas  <span class="ot">&lt;-</span> <span class="fu">dbExistsTable</span>(con, <span class="st">"weight_deltas"</span>)</span>
-<span id="cb1-64"><a href="#cb1-64" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-65"><a href="#cb1-65" aria-hidden="true" tabindex="-1"></a>feature_stats <span class="ot">&lt;-</span> <span class="cf">if</span> (has_feature_stats) <span class="fu">dbReadTable</span>(con, <span class="st">"feature_stats"</span>) <span class="cf">else</span> <span class="cn">NULL</span></span>
-<span id="cb1-66"><a href="#cb1-66" aria-hidden="true" tabindex="-1"></a>game_records  <span class="ot">&lt;-</span> <span class="cf">if</span> (has_game_records)  <span class="fu">dbReadTable</span>(con, <span class="st">"game_records"</span>)  <span class="cf">else</span> <span class="cn">NULL</span></span>
-<span id="cb1-67"><a href="#cb1-67" aria-hidden="true" tabindex="-1"></a>weight_deltas <span class="ot">&lt;-</span> <span class="cf">if</span> (has_weight_deltas) <span class="fu">dbReadTable</span>(con, <span class="st">"weight_deltas"</span>) <span class="cf">else</span> <span class="cn">NULL</span></span>
-<span id="cb1-68"><a href="#cb1-68" aria-hidden="true" tabindex="-1"></a><span class="fu">dbDisconnect</span>(con)</span>
-<span id="cb1-69"><a href="#cb1-69" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-70"><a href="#cb1-70" aria-hidden="true" tabindex="-1"></a><span class="co"># Available run IDs</span></span>
-<span id="cb1-71"><a href="#cb1-71" aria-hidden="true" tabindex="-1"></a>run_ids <span class="ot">&lt;-</span> <span class="fu">sort</span>(<span class="fu">unique</span>(games<span class="sc">$</span>run_id))</span>
-<span id="cb1-72"><a href="#cb1-72" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Runs in database:"</span>, <span class="fu">paste</span>(run_ids, <span class="at">collapse =</span> <span class="st">", "</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>ALL_GROUPS <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"Material"</span>, <span class="st">"Pawn structure"</span>, <span class="st">"Positional"</span>, <span class="st">"Coordination &amp; development"</span>)</span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a>FEATURE_ORDER <span class="ot">&lt;-</span> <span class="fu">c</span>(MATERIAL_FEATURES, PAWN_FEATURES, POSITIONAL_FEATURES, DEVELOPMENT_FEATURES)</span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a>FEATURE_GROUP <span class="ot">&lt;-</span> <span class="fu">tibble</span>(</span>
+<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a>  <span class="at">feature_name =</span> FEATURE_ORDER,</span>
+<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a>  <span class="at">group =</span> <span class="fu">c</span>(</span>
+<span id="cb1-23"><a href="#cb1-23" aria-hidden="true" tabindex="-1"></a>    <span class="fu">rep</span>(<span class="st">"Material"</span>,                   <span class="fu">length</span>(MATERIAL_FEATURES)),</span>
+<span id="cb1-24"><a href="#cb1-24" aria-hidden="true" tabindex="-1"></a>    <span class="fu">rep</span>(<span class="st">"Pawn structure"</span>,             <span class="fu">length</span>(PAWN_FEATURES)),</span>
+<span id="cb1-25"><a href="#cb1-25" aria-hidden="true" tabindex="-1"></a>    <span class="fu">rep</span>(<span class="st">"Positional"</span>,                 <span class="fu">length</span>(POSITIONAL_FEATURES)),</span>
+<span id="cb1-26"><a href="#cb1-26" aria-hidden="true" tabindex="-1"></a>    <span class="fu">rep</span>(<span class="st">"Coordination &amp; development"</span>, <span class="fu">length</span>(DEVELOPMENT_FEATURES))</span>
+<span id="cb1-27"><a href="#cb1-27" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb1-28"><a href="#cb1-28" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb1-29"><a href="#cb1-29" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-30"><a href="#cb1-30" aria-hidden="true" tabindex="-1"></a><span class="co"># Canonical piece values (for reference lines in material section)</span></span>
+<span id="cb1-31"><a href="#cb1-31" aria-hidden="true" tabindex="-1"></a>CANONICAL <span class="ot">&lt;-</span> <span class="fu">tibble</span>(</span>
+<span id="cb1-32"><a href="#cb1-32" aria-hidden="true" tabindex="-1"></a>  <span class="at">feature_name  =</span> MATERIAL_FEATURES,</span>
+<span id="cb1-33"><a href="#cb1-33" aria-hidden="true" tabindex="-1"></a>  <span class="at">canonical_val =</span> <span class="fu">c</span>(<span class="dv">9</span>, <span class="dv">5</span>, <span class="dv">3</span>, <span class="dv">3</span>, <span class="dv">1</span>)</span>
+<span id="cb1-34"><a href="#cb1-34" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb1-35"><a href="#cb1-35" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-36"><a href="#cb1-36" aria-hidden="true" tabindex="-1"></a><span class="co"># Outcome → numeric from white's perspective</span></span>
+<span id="cb1-37"><a href="#cb1-37" aria-hidden="true" tabindex="-1"></a>outcome_numeric <span class="ot">&lt;-</span> <span class="cf">function</span>(outcome) {</span>
+<span id="cb1-38"><a href="#cb1-38" aria-hidden="true" tabindex="-1"></a>  <span class="fu">case_when</span>(</span>
+<span id="cb1-39"><a href="#cb1-39" aria-hidden="true" tabindex="-1"></a>    outcome <span class="sc">==</span> <span class="st">"1-0"</span>     <span class="sc">~</span>  <span class="dv">1</span>,</span>
+<span id="cb1-40"><a href="#cb1-40" aria-hidden="true" tabindex="-1"></a>    outcome <span class="sc">==</span> <span class="st">"0-1"</span>     <span class="sc">~</span> <span class="sc">-</span><span class="dv">1</span>,</span>
+<span id="cb1-41"><a href="#cb1-41" aria-hidden="true" tabindex="-1"></a>    outcome <span class="sc">==</span> <span class="st">"1/2-1/2"</span> <span class="sc">~</span>  <span class="dv">0</span>,</span>
+<span id="cb1-42"><a href="#cb1-42" aria-hidden="true" tabindex="-1"></a>    <span class="at">.default =</span> <span class="cn">NA_real_</span></span>
+<span id="cb1-43"><a href="#cb1-43" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb1-44"><a href="#cb1-44" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb1-45"><a href="#cb1-45" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-46"><a href="#cb1-46" aria-hidden="true" tabindex="-1"></a><span class="co"># Rolling correlation helper</span></span>
+<span id="cb1-47"><a href="#cb1-47" aria-hidden="true" tabindex="-1"></a>roll_cor <span class="ot">&lt;-</span> <span class="cf">function</span>(x, y, <span class="at">window =</span> <span class="dv">100</span>) {</span>
+<span id="cb1-48"><a href="#cb1-48" aria-hidden="true" tabindex="-1"></a>  n <span class="ot">&lt;-</span> <span class="fu">length</span>(x)</span>
+<span id="cb1-49"><a href="#cb1-49" aria-hidden="true" tabindex="-1"></a>  <span class="fu">map_dbl</span>(<span class="fu">seq_len</span>(n), <span class="cf">function</span>(i) {</span>
+<span id="cb1-50"><a href="#cb1-50" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (i <span class="sc">&lt;</span> window) <span class="fu">return</span>(<span class="cn">NA_real_</span>)</span>
+<span id="cb1-51"><a href="#cb1-51" aria-hidden="true" tabindex="-1"></a>    <span class="fu">cor</span>(x[(i <span class="sc">-</span> window <span class="sc">+</span> <span class="dv">1</span>)<span class="sc">:</span>i], y[(i <span class="sc">-</span> window <span class="sc">+</span> <span class="dv">1</span>)<span class="sc">:</span>i], <span class="at">use =</span> <span class="st">"complete.obs"</span>)</span>
+<span id="cb1-52"><a href="#cb1-52" aria-hidden="true" tabindex="-1"></a>  })</span>
+<span id="cb1-53"><a href="#cb1-53" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb1-54"><a href="#cb1-54" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-55"><a href="#cb1-55" aria-hidden="true" tabindex="-1"></a><span class="co"># Connect and load tables</span></span>
+<span id="cb1-56"><a href="#cb1-56" aria-hidden="true" tabindex="-1"></a>con    <span class="ot">&lt;-</span> <span class="fu">dbConnect</span>(<span class="fu">SQLite</span>(), DB_PATH)</span>
+<span id="cb1-57"><a href="#cb1-57" aria-hidden="true" tabindex="-1"></a>runs   <span class="ot">&lt;-</span> <span class="fu">dbReadTable</span>(con, <span class="st">"runs"</span>)</span>
+<span id="cb1-58"><a href="#cb1-58" aria-hidden="true" tabindex="-1"></a>games  <span class="ot">&lt;-</span> <span class="fu">dbReadTable</span>(con, <span class="st">"games"</span>)</span>
+<span id="cb1-59"><a href="#cb1-59" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-60"><a href="#cb1-60" aria-hidden="true" tabindex="-1"></a><span class="co"># Deduplicate weights: keep the last-written row per (run_id, game_number, feature_name)</span></span>
+<span id="cb1-61"><a href="#cb1-61" aria-hidden="true" tabindex="-1"></a>weights <span class="ot">&lt;-</span> <span class="fu">dbGetQuery</span>(con,</span>
+<span id="cb1-62"><a href="#cb1-62" aria-hidden="true" tabindex="-1"></a>  <span class="st">"SELECT run_id, game_number, feature_name, weight_value</span></span>
+<span id="cb1-63"><a href="#cb1-63" aria-hidden="true" tabindex="-1"></a><span class="st">   FROM weights</span></span>
+<span id="cb1-64"><a href="#cb1-64" aria-hidden="true" tabindex="-1"></a><span class="st">   GROUP BY run_id, game_number, feature_name</span></span>
+<span id="cb1-65"><a href="#cb1-65" aria-hidden="true" tabindex="-1"></a><span class="st">   HAVING rowid = MAX(rowid)"</span></span>
+<span id="cb1-66"><a href="#cb1-66" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb1-67"><a href="#cb1-67" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-68"><a href="#cb1-68" aria-hidden="true" tabindex="-1"></a>has_feature_stats <span class="ot">&lt;-</span> <span class="fu">dbExistsTable</span>(con, <span class="st">"feature_stats"</span>)</span>
+<span id="cb1-69"><a href="#cb1-69" aria-hidden="true" tabindex="-1"></a>has_game_records  <span class="ot">&lt;-</span> <span class="fu">dbExistsTable</span>(con, <span class="st">"game_records"</span>)</span>
+<span id="cb1-70"><a href="#cb1-70" aria-hidden="true" tabindex="-1"></a>has_weight_deltas <span class="ot">&lt;-</span> <span class="fu">dbExistsTable</span>(con, <span class="st">"weight_deltas"</span>)</span>
+<span id="cb1-71"><a href="#cb1-71" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-72"><a href="#cb1-72" aria-hidden="true" tabindex="-1"></a>feature_stats <span class="ot">&lt;-</span> <span class="cf">if</span> (has_feature_stats) <span class="fu">dbReadTable</span>(con, <span class="st">"feature_stats"</span>) <span class="cf">else</span> <span class="cn">NULL</span></span>
+<span id="cb1-73"><a href="#cb1-73" aria-hidden="true" tabindex="-1"></a>game_records  <span class="ot">&lt;-</span> <span class="cf">if</span> (has_game_records)  <span class="fu">dbReadTable</span>(con, <span class="st">"game_records"</span>)  <span class="cf">else</span> <span class="cn">NULL</span></span>
+<span id="cb1-74"><a href="#cb1-74" aria-hidden="true" tabindex="-1"></a>weight_deltas <span class="ot">&lt;-</span> <span class="cf">if</span> (has_weight_deltas) <span class="fu">dbReadTable</span>(con, <span class="st">"weight_deltas"</span>) <span class="cf">else</span> <span class="cn">NULL</span></span>
+<span id="cb1-75"><a href="#cb1-75" aria-hidden="true" tabindex="-1"></a><span class="fu">dbDisconnect</span>(con)</span>
+<span id="cb1-76"><a href="#cb1-76" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-77"><a href="#cb1-77" aria-hidden="true" tabindex="-1"></a>run_ids <span class="ot">&lt;-</span> <span class="fu">sort</span>(<span class="fu">unique</span>(games<span class="sc">$</span>run_id))</span>
+<span id="cb1-78"><a href="#cb1-78" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Runs in database:"</span>, <span class="fu">paste</span>(run_ids, <span class="at">collapse =</span> <span class="st">", "</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
 <div class="cell-output cell-output-stdout">
-<pre><code>Runs in database: 1 </code></pre>
+<pre><code>Runs in database: 1, 2 </code></pre>
 </div>
 <details class="code-fold">
 <summary>Code</summary>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Games per run:</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-</details>
-<div class="cell-output cell-output-stdout">
-<pre><code>Games per run:</code></pre>
-</div>
-<details class="code-fold">
-<summary>Code</summary>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>games <span class="sc">|&gt;</span> <span class="fu">count</span>(run_id) <span class="sc">|&gt;</span> <span class="fu">print</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>games <span class="sc">|&gt;</span> <span class="fu">count</span>(run_id) <span class="sc">|&gt;</span> <span class="fu">print</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
 <div class="cell-output cell-output-stdout">
 <pre><code>  run_id   n
-1      1 200</code></pre>
+1      1 200
+2      2  50</code></pre>
 </div>
 </div>
 <section id="weight-trajectories" class="level2">
@@ -230,32 +234,31 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <div class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>weights_tidy <span class="ot">&lt;-</span> weights <span class="sc">|&gt;</span></span>
-<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">left_join</span>(FEATURE_GROUP, <span class="at">by =</span> <span class="st">"feature_name"</span>) <span class="sc">|&gt;</span></span>
-<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(</span>
-<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">feature_name =</span> <span class="fu">factor</span>(feature_name, <span class="at">levels =</span> FEATURE_ORDER),</span>
-<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">group        =</span> <span class="fu">factor</span>(group, <span class="at">levels =</span> <span class="fu">c</span>(<span class="st">"Material"</span>, <span class="st">"Pawn structure"</span>, <span class="st">"Positional"</span>))</span>
-<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a><span class="co"># One plot per group so y-scales can breathe</span></span>
-<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a>plot_weight_group <span class="ot">&lt;-</span> <span class="cf">function</span>(grp) {</span>
-<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>  weights_tidy <span class="sc">|&gt;</span></span>
-<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a>    <span class="fu">filter</span>(group <span class="sc">==</span> grp) <span class="sc">|&gt;</span></span>
-<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a>    <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> game_number, <span class="at">y =</span> weight_value, <span class="at">colour =</span> feature_name)) <span class="sc">+</span></span>
-<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_line</span>(<span class="at">linewidth =</span> <span class="fl">0.8</span>) <span class="sc">+</span></span>
-<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_hline</span>(<span class="at">yintercept =</span> <span class="dv">0</span>, <span class="at">linetype =</span> <span class="st">"dashed"</span>, <span class="at">colour =</span> <span class="st">"grey60"</span>) <span class="sc">+</span></span>
-<span id="cb7-15"><a href="#cb7-15" aria-hidden="true" tabindex="-1"></a>    <span class="fu">facet_wrap</span>(<span class="sc">~</span> run_id, <span class="at">labeller =</span> label_both, <span class="at">scales =</span> <span class="st">"free_x"</span>) <span class="sc">+</span></span>
-<span id="cb7-16"><a href="#cb7-16" aria-hidden="true" tabindex="-1"></a>    <span class="fu">labs</span>(</span>
-<span id="cb7-17"><a href="#cb7-17" aria-hidden="true" tabindex="-1"></a>      <span class="at">title    =</span> <span class="fu">paste</span>(grp, <span class="st">"weights over training"</span>),</span>
-<span id="cb7-18"><a href="#cb7-18" aria-hidden="true" tabindex="-1"></a>      <span class="at">x        =</span> <span class="st">"Game number"</span>,</span>
-<span id="cb7-19"><a href="#cb7-19" aria-hidden="true" tabindex="-1"></a>      <span class="at">y        =</span> <span class="st">"Weight value"</span>,</span>
-<span id="cb7-20"><a href="#cb7-20" aria-hidden="true" tabindex="-1"></a>      <span class="at">colour   =</span> <span class="cn">NULL</span></span>
-<span id="cb7-21"><a href="#cb7-21" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">+</span></span>
-<span id="cb7-22"><a href="#cb7-22" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>) <span class="sc">+</span></span>
-<span id="cb7-23"><a href="#cb7-23" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>)</span>
-<span id="cb7-24"><a href="#cb7-24" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb7-25"><a href="#cb7-25" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-26"><a href="#cb7-26" aria-hidden="true" tabindex="-1"></a><span class="fu">plot_weight_group</span>(<span class="st">"Material"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>weights_tidy <span class="ot">&lt;-</span> weights <span class="sc">|&gt;</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">left_join</span>(FEATURE_GROUP, <span class="at">by =</span> <span class="st">"feature_name"</span>) <span class="sc">|&gt;</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(</span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">feature_name =</span> <span class="fu">factor</span>(feature_name, <span class="at">levels =</span> FEATURE_ORDER),</span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">group        =</span> <span class="fu">factor</span>(group, <span class="at">levels =</span> ALL_GROUPS)</span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>plot_weight_group <span class="ot">&lt;-</span> <span class="cf">function</span>(grp) {</span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>  weights_tidy <span class="sc">|&gt;</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">filter</span>(group <span class="sc">==</span> grp) <span class="sc">|&gt;</span></span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>    <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> game_number, <span class="at">y =</span> weight_value, <span class="at">colour =</span> feature_name)) <span class="sc">+</span></span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_line</span>(<span class="at">linewidth =</span> <span class="fl">0.8</span>) <span class="sc">+</span></span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_hline</span>(<span class="at">yintercept =</span> <span class="dv">0</span>, <span class="at">linetype =</span> <span class="st">"dashed"</span>, <span class="at">colour =</span> <span class="st">"grey60"</span>) <span class="sc">+</span></span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a>    <span class="fu">facet_wrap</span>(<span class="sc">~</span> run_id, <span class="at">labeller =</span> label_both, <span class="at">scales =</span> <span class="st">"free_x"</span>) <span class="sc">+</span></span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a>    <span class="fu">labs</span>(</span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a>      <span class="at">title  =</span> <span class="fu">paste</span>(grp, <span class="st">"weights over training"</span>),</span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a>      <span class="at">x      =</span> <span class="st">"Game number"</span>,</span>
+<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a>      <span class="at">y      =</span> <span class="st">"Weight value"</span>,</span>
+<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a>      <span class="at">colour =</span> <span class="cn">NULL</span></span>
+<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">+</span></span>
+<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>) <span class="sc">+</span></span>
+<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>)</span>
+<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-25"><a href="#cb5-25" aria-hidden="true" tabindex="-1"></a><span class="fu">plot_weight_group</span>(<span class="st">"Material"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
 <div class="cell-output-display">
 <div>
@@ -266,7 +269,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </div>
 <details class="code-fold">
 <summary>Code</summary>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">plot_weight_group</span>(<span class="st">"Pawn structure"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">plot_weight_group</span>(<span class="st">"Pawn structure"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
 <div class="cell-output-display">
 <div>
@@ -277,12 +280,23 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </div>
 <details class="code-fold">
 <summary>Code</summary>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">plot_weight_group</span>(<span class="st">"Positional"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="fu">plot_weight_group</span>(<span class="st">"Positional"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
 <div class="cell-output-display">
 <div>
 <figure class="figure">
 <p><img src="03_visualize_files/figure-html/weight-trajectories-3.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+<details class="code-fold">
+<summary>Code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">plot_weight_group</span>(<span class="st">"Coordination &amp; development"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="03_visualize_files/figure-html/weight-trajectories-4.png" class="img-fluid figure-img" width="672"></p>
 </figure>
 </div>
 </div>
@@ -293,32 +307,30 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <div class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Normalise weights within each run/checkpoint by dividing by the pawn weight</span></span>
-<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="co"># (only where pawn weight != 0, to avoid division by zero)</span></span>
-<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>weights <span class="sc">|&gt;</span></span>
-<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(feature_name <span class="sc">%in%</span> MATERIAL_FEATURES) <span class="sc">|&gt;</span></span>
-<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">pivot_wider</span>(<span class="at">names_from =</span> feature_name, <span class="at">values_from =</span> weight_value) <span class="sc">|&gt;</span></span>
-<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(<span class="sc">!</span><span class="fu">is.na</span>(material_pawn), material_pawn <span class="sc">!=</span> <span class="dv">0</span>) <span class="sc">|&gt;</span></span>
-<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="fu">across</span>(<span class="fu">all_of</span>(MATERIAL_FEATURES), <span class="sc">~</span> . <span class="sc">/</span> <span class="fu">abs</span>(material_pawn))) <span class="sc">|&gt;</span></span>
-<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">pivot_longer</span>(<span class="fu">all_of</span>(MATERIAL_FEATURES),</span>
-<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a>               <span class="at">names_to =</span> <span class="st">"feature_name"</span>, <span class="at">values_to =</span> <span class="st">"normalised_weight"</span>) <span class="sc">|&gt;</span></span>
-<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">left_join</span>(CANONICAL, <span class="at">by =</span> <span class="st">"feature_name"</span>) <span class="sc">|&gt;</span></span>
-<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> game_number, <span class="at">y =</span> normalised_weight, <span class="at">colour =</span> feature_name)) <span class="sc">+</span></span>
-<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="at">linewidth =</span> <span class="fl">0.8</span>) <span class="sc">+</span></span>
-<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_hline</span>(</span>
-<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">data =</span> CANONICAL,</span>
-<span id="cb10-15"><a href="#cb10-15" aria-hidden="true" tabindex="-1"></a>    <span class="fu">aes</span>(<span class="at">yintercept =</span> canonical_val, <span class="at">colour =</span> feature_name),</span>
-<span id="cb10-16"><a href="#cb10-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">linetype =</span> <span class="st">"dotted"</span>, <span class="at">linewidth =</span> <span class="fl">0.6</span></span>
-<span id="cb10-17"><a href="#cb10-17" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
-<span id="cb10-18"><a href="#cb10-18" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> run_id, <span class="at">labeller =</span> label_both, <span class="at">scales =</span> <span class="st">"free_x"</span>) <span class="sc">+</span></span>
-<span id="cb10-19"><a href="#cb10-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
-<span id="cb10-20"><a href="#cb10-20" aria-hidden="true" tabindex="-1"></a>    <span class="at">title    =</span> <span class="st">"Material weights normalised to pawn (dotted = canonical value)"</span>,</span>
-<span id="cb10-21"><a href="#cb10-21" aria-hidden="true" tabindex="-1"></a>    <span class="at">x        =</span> <span class="st">"Game number"</span>,</span>
-<span id="cb10-22"><a href="#cb10-22" aria-hidden="true" tabindex="-1"></a>    <span class="at">y        =</span> <span class="st">"Weight relative to |pawn weight|"</span>,</span>
-<span id="cb10-23"><a href="#cb10-23" aria-hidden="true" tabindex="-1"></a>    <span class="at">colour   =</span> <span class="cn">NULL</span></span>
-<span id="cb10-24"><a href="#cb10-24" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
-<span id="cb10-25"><a href="#cb10-25" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>) <span class="sc">+</span></span>
-<span id="cb10-26"><a href="#cb10-26" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>weights <span class="sc">|&gt;</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(feature_name <span class="sc">%in%</span> MATERIAL_FEATURES) <span class="sc">|&gt;</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">pivot_wider</span>(<span class="at">names_from =</span> feature_name, <span class="at">values_from =</span> weight_value) <span class="sc">|&gt;</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(<span class="sc">!</span><span class="fu">is.na</span>(material_pawn), material_pawn <span class="sc">!=</span> <span class="dv">0</span>) <span class="sc">|&gt;</span></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="fu">across</span>(<span class="fu">all_of</span>(MATERIAL_FEATURES), <span class="sc">~</span> . <span class="sc">/</span> <span class="fu">abs</span>(material_pawn))) <span class="sc">|&gt;</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">pivot_longer</span>(<span class="fu">all_of</span>(MATERIAL_FEATURES),</span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>               <span class="at">names_to =</span> <span class="st">"feature_name"</span>, <span class="at">values_to =</span> <span class="st">"normalised_weight"</span>) <span class="sc">|&gt;</span></span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">left_join</span>(CANONICAL, <span class="at">by =</span> <span class="st">"feature_name"</span>) <span class="sc">|&gt;</span></span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> game_number, <span class="at">y =</span> normalised_weight, <span class="at">colour =</span> feature_name)) <span class="sc">+</span></span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="at">linewidth =</span> <span class="fl">0.8</span>) <span class="sc">+</span></span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_hline</span>(</span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">data =</span> CANONICAL,</span>
+<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a>    <span class="fu">aes</span>(<span class="at">yintercept =</span> canonical_val, <span class="at">colour =</span> feature_name),</span>
+<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">linetype =</span> <span class="st">"dotted"</span>, <span class="at">linewidth =</span> <span class="fl">0.6</span></span>
+<span id="cb9-15"><a href="#cb9-15" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb9-16"><a href="#cb9-16" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> run_id, <span class="at">labeller =</span> label_both, <span class="at">scales =</span> <span class="st">"free_x"</span>) <span class="sc">+</span></span>
+<span id="cb9-17"><a href="#cb9-17" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb9-18"><a href="#cb9-18" aria-hidden="true" tabindex="-1"></a>    <span class="at">title  =</span> <span class="st">"Material weights normalised to pawn (dotted = canonical value)"</span>,</span>
+<span id="cb9-19"><a href="#cb9-19" aria-hidden="true" tabindex="-1"></a>    <span class="at">x      =</span> <span class="st">"Game number"</span>,</span>
+<span id="cb9-20"><a href="#cb9-20" aria-hidden="true" tabindex="-1"></a>    <span class="at">y      =</span> <span class="st">"Weight relative to |pawn weight|"</span>,</span>
+<span id="cb9-21"><a href="#cb9-21" aria-hidden="true" tabindex="-1"></a>    <span class="at">colour =</span> <span class="cn">NULL</span></span>
+<span id="cb9-22"><a href="#cb9-22" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb9-23"><a href="#cb9-23" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>) <span class="sc">+</span></span>
+<span id="cb9-24"><a href="#cb9-24" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
 <div class="cell-output-display">
 <div>
@@ -336,52 +348,49 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <div class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>games_clean <span class="ot">&lt;-</span> games <span class="sc">|&gt;</span></span>
-<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">outcome_label =</span> <span class="fu">case_when</span>(</span>
-<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>    outcome <span class="sc">==</span> <span class="st">"1-0"</span>     <span class="sc">~</span> <span class="st">"White wins"</span>,</span>
-<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>    outcome <span class="sc">==</span> <span class="st">"0-1"</span>     <span class="sc">~</span> <span class="st">"Black wins"</span>,</span>
-<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>    outcome <span class="sc">==</span> <span class="st">"1/2-1/2"</span> <span class="sc">~</span> <span class="st">"Draw"</span>,</span>
-<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">.default =</span> <span class="st">"Other"</span></span>
-<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a>  ))</span>
-<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a><span class="co"># Rolling window size (in games)</span></span>
-<span id="cb11-10"><a href="#cb11-10" aria-hidden="true" tabindex="-1"></a>WIN <span class="ot">&lt;-</span> <span class="dv">50</span></span>
-<span id="cb11-11"><a href="#cb11-11" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb11-12"><a href="#cb11-12" aria-hidden="true" tabindex="-1"></a>games_rolling <span class="ot">&lt;-</span> games_clean <span class="sc">|&gt;</span></span>
-<span id="cb11-13"><a href="#cb11-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">arrange</span>(run_id, game_number) <span class="sc">|&gt;</span></span>
-<span id="cb11-14"><a href="#cb11-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(run_id) <span class="sc">|&gt;</span></span>
-<span id="cb11-15"><a href="#cb11-15" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(</span>
-<span id="cb11-16"><a href="#cb11-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">white_win  =</span> (outcome <span class="sc">==</span> <span class="st">"1-0"</span>),</span>
-<span id="cb11-17"><a href="#cb11-17" aria-hidden="true" tabindex="-1"></a>    <span class="at">black_win  =</span> (outcome <span class="sc">==</span> <span class="st">"0-1"</span>),</span>
-<span id="cb11-18"><a href="#cb11-18" aria-hidden="true" tabindex="-1"></a>    <span class="at">draw       =</span> (outcome <span class="sc">==</span> <span class="st">"1/2-1/2"</span>),</span>
-<span id="cb11-19"><a href="#cb11-19" aria-hidden="true" tabindex="-1"></a>    <span class="at">decisive   =</span> white_win <span class="sc">|</span> black_win,</span>
-<span id="cb11-20"><a href="#cb11-20" aria-hidden="true" tabindex="-1"></a>    <span class="at">roll_white =</span> slider<span class="sc">::</span><span class="fu">slide_dbl</span>(white_win, mean, <span class="at">.before =</span> WIN <span class="sc">-</span> <span class="dv">1</span>, <span class="at">.complete =</span> <span class="cn">FALSE</span>),</span>
-<span id="cb11-21"><a href="#cb11-21" aria-hidden="true" tabindex="-1"></a>    <span class="at">roll_draw  =</span> slider<span class="sc">::</span><span class="fu">slide_dbl</span>(draw,      mean, <span class="at">.before =</span> WIN <span class="sc">-</span> <span class="dv">1</span>, <span class="at">.complete =</span> <span class="cn">FALSE</span>),</span>
-<span id="cb11-22"><a href="#cb11-22" aria-hidden="true" tabindex="-1"></a>    <span class="at">roll_len   =</span> slider<span class="sc">::</span><span class="fu">slide_dbl</span>(n_halfmoves, mean, <span class="at">.before =</span> WIN <span class="sc">-</span> <span class="dv">1</span>, <span class="at">.complete =</span> <span class="cn">FALSE</span>)</span>
-<span id="cb11-23"><a href="#cb11-23" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
-<span id="cb11-24"><a href="#cb11-24" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ungroup</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>games_clean <span class="ot">&lt;-</span> games <span class="sc">|&gt;</span></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">outcome_label =</span> <span class="fu">case_when</span>(</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>    outcome <span class="sc">==</span> <span class="st">"1-0"</span>     <span class="sc">~</span> <span class="st">"White wins"</span>,</span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>    outcome <span class="sc">==</span> <span class="st">"0-1"</span>     <span class="sc">~</span> <span class="st">"Black wins"</span>,</span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>    outcome <span class="sc">==</span> <span class="st">"1/2-1/2"</span> <span class="sc">~</span> <span class="st">"Draw"</span>,</span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">.default =</span> <span class="st">"Other"</span></span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a>  ))</span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a>WIN <span class="ot">&lt;-</span> <span class="dv">50</span></span>
+<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a>games_rolling <span class="ot">&lt;-</span> games_clean <span class="sc">|&gt;</span></span>
+<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">arrange</span>(run_id, game_number) <span class="sc">|&gt;</span></span>
+<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(run_id) <span class="sc">|&gt;</span></span>
+<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(</span>
+<span id="cb10-15"><a href="#cb10-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">white_win  =</span> (outcome <span class="sc">==</span> <span class="st">"1-0"</span>),</span>
+<span id="cb10-16"><a href="#cb10-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">draw       =</span> (outcome <span class="sc">==</span> <span class="st">"1/2-1/2"</span>),</span>
+<span id="cb10-17"><a href="#cb10-17" aria-hidden="true" tabindex="-1"></a>    <span class="at">roll_white =</span> slider<span class="sc">::</span><span class="fu">slide_dbl</span>(white_win,   mean, <span class="at">.before =</span> WIN <span class="sc">-</span> <span class="dv">1</span>, <span class="at">.complete =</span> <span class="cn">FALSE</span>),</span>
+<span id="cb10-18"><a href="#cb10-18" aria-hidden="true" tabindex="-1"></a>    <span class="at">roll_draw  =</span> slider<span class="sc">::</span><span class="fu">slide_dbl</span>(draw,        mean, <span class="at">.before =</span> WIN <span class="sc">-</span> <span class="dv">1</span>, <span class="at">.complete =</span> <span class="cn">FALSE</span>),</span>
+<span id="cb10-19"><a href="#cb10-19" aria-hidden="true" tabindex="-1"></a>    <span class="at">roll_len   =</span> slider<span class="sc">::</span><span class="fu">slide_dbl</span>(n_halfmoves, mean, <span class="at">.before =</span> WIN <span class="sc">-</span> <span class="dv">1</span>, <span class="at">.complete =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb10-20"><a href="#cb10-20" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
+<span id="cb10-21"><a href="#cb10-21" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ungroup</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
 </div>
 <div class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb12"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a>games_rolling <span class="sc">|&gt;</span></span>
-<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(run_id, game_number, roll_white, roll_draw) <span class="sc">|&gt;</span></span>
-<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">pivot_longer</span>(<span class="fu">c</span>(roll_white, roll_draw),</span>
-<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>               <span class="at">names_to =</span> <span class="st">"series"</span>, <span class="at">values_to =</span> <span class="st">"rate"</span>) <span class="sc">|&gt;</span></span>
-<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">series =</span> <span class="fu">if_else</span>(series <span class="sc">==</span> <span class="st">"roll_white"</span>, <span class="st">"White win rate"</span>, <span class="st">"Draw rate"</span>)) <span class="sc">|&gt;</span></span>
-<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> game_number, <span class="at">y =</span> rate, <span class="at">colour =</span> series)) <span class="sc">+</span></span>
-<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="at">linewidth =</span> <span class="fl">0.8</span>) <span class="sc">+</span></span>
-<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> run_id, <span class="at">labeller =</span> label_both, <span class="at">scales =</span> <span class="st">"free_x"</span>) <span class="sc">+</span></span>
-<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_continuous</span>(<span class="at">labels =</span> scales<span class="sc">::</span><span class="fu">percent_format</span>()) <span class="sc">+</span></span>
-<span id="cb12-10"><a href="#cb12-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
-<span id="cb12-11"><a href="#cb12-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">title  =</span> <span class="fu">paste0</span>(<span class="st">"Rolling outcome rates ("</span>, WIN, <span class="st">"-game window)"</span>),</span>
-<span id="cb12-12"><a href="#cb12-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">x      =</span> <span class="st">"Game number"</span>,</span>
-<span id="cb12-13"><a href="#cb12-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">y      =</span> <span class="st">"Rate"</span>,</span>
-<span id="cb12-14"><a href="#cb12-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">colour =</span> <span class="cn">NULL</span></span>
-<span id="cb12-15"><a href="#cb12-15" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
-<span id="cb12-16"><a href="#cb12-16" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>) <span class="sc">+</span></span>
-<span id="cb12-17"><a href="#cb12-17" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>games_rolling <span class="sc">|&gt;</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(run_id, game_number, roll_white, roll_draw) <span class="sc">|&gt;</span></span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">pivot_longer</span>(<span class="fu">c</span>(roll_white, roll_draw),</span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>               <span class="at">names_to =</span> <span class="st">"series"</span>, <span class="at">values_to =</span> <span class="st">"rate"</span>) <span class="sc">|&gt;</span></span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">series =</span> <span class="fu">if_else</span>(series <span class="sc">==</span> <span class="st">"roll_white"</span>, <span class="st">"White win rate"</span>, <span class="st">"Draw rate"</span>)) <span class="sc">|&gt;</span></span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> game_number, <span class="at">y =</span> rate, <span class="at">colour =</span> series)) <span class="sc">+</span></span>
+<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="at">linewidth =</span> <span class="fl">0.8</span>) <span class="sc">+</span></span>
+<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> run_id, <span class="at">labeller =</span> label_both, <span class="at">scales =</span> <span class="st">"free_x"</span>) <span class="sc">+</span></span>
+<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_continuous</span>(<span class="at">labels =</span> scales<span class="sc">::</span><span class="fu">percent_format</span>()) <span class="sc">+</span></span>
+<span id="cb11-10"><a href="#cb11-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb11-11"><a href="#cb11-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">title  =</span> <span class="fu">paste0</span>(<span class="st">"Rolling outcome rates ("</span>, WIN, <span class="st">"-game window)"</span>),</span>
+<span id="cb11-12"><a href="#cb11-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">x      =</span> <span class="st">"Game number"</span>,</span>
+<span id="cb11-13"><a href="#cb11-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">y      =</span> <span class="st">"Rate"</span>,</span>
+<span id="cb11-14"><a href="#cb11-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">colour =</span> <span class="cn">NULL</span></span>
+<span id="cb11-15"><a href="#cb11-15" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb11-16"><a href="#cb11-16" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>) <span class="sc">+</span></span>
+<span id="cb11-17"><a href="#cb11-17" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
 <div class="cell-output-display">
 <div>
@@ -394,16 +403,16 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <div class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>games_rolling <span class="sc">|&gt;</span></span>
-<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> game_number, <span class="at">y =</span> roll_len)) <span class="sc">+</span></span>
-<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="at">colour =</span> <span class="st">"steelblue"</span>, <span class="at">linewidth =</span> <span class="fl">0.8</span>) <span class="sc">+</span></span>
-<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> run_id, <span class="at">labeller =</span> label_both, <span class="at">scales =</span> <span class="st">"free_x"</span>) <span class="sc">+</span></span>
-<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
-<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">title =</span> <span class="fu">paste0</span>(<span class="st">"Rolling average game length ("</span>, WIN, <span class="st">"-game window)"</span>),</span>
-<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">x     =</span> <span class="st">"Game number"</span>,</span>
-<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">y     =</span> <span class="st">"Half-moves per game"</span></span>
-<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
-<span id="cb13-10"><a href="#cb13-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb12"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a>games_rolling <span class="sc">|&gt;</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> game_number, <span class="at">y =</span> roll_len)) <span class="sc">+</span></span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="at">colour =</span> <span class="st">"steelblue"</span>, <span class="at">linewidth =</span> <span class="fl">0.8</span>) <span class="sc">+</span></span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> run_id, <span class="at">labeller =</span> label_both, <span class="at">scales =</span> <span class="st">"free_x"</span>) <span class="sc">+</span></span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">title =</span> <span class="fu">paste0</span>(<span class="st">"Rolling average game length ("</span>, WIN, <span class="st">"-game window)"</span>),</span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">x     =</span> <span class="st">"Game number"</span>,</span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">y     =</span> <span class="st">"Half-moves per game"</span></span>
+<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb12-10"><a href="#cb12-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
 <div class="cell-output-display">
 <div>
@@ -416,22 +425,22 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <div class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb14"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a>games_clean <span class="sc">|&gt;</span></span>
-<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">count</span>(run_id, terminated_by) <span class="sc">|&gt;</span></span>
-<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(run_id) <span class="sc">|&gt;</span></span>
-<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">pct =</span> n <span class="sc">/</span> <span class="fu">sum</span>(n)) <span class="sc">|&gt;</span></span>
-<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ungroup</span>() <span class="sc">|&gt;</span></span>
-<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> terminated_by, <span class="at">y =</span> pct, <span class="at">fill =</span> terminated_by)) <span class="sc">+</span></span>
-<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_col</span>(<span class="at">show.legend =</span> <span class="cn">FALSE</span>) <span class="sc">+</span></span>
-<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_text</span>(<span class="fu">aes</span>(<span class="at">label =</span> scales<span class="sc">::</span><span class="fu">percent</span>(pct, <span class="at">accuracy =</span> <span class="dv">1</span>)), <span class="at">vjust =</span> <span class="sc">-</span><span class="fl">0.3</span>, <span class="at">size =</span> <span class="fl">3.5</span>) <span class="sc">+</span></span>
-<span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> run_id, <span class="at">labeller =</span> label_both) <span class="sc">+</span></span>
-<span id="cb14-10"><a href="#cb14-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_continuous</span>(<span class="at">labels =</span> scales<span class="sc">::</span><span class="fu">percent_format</span>(), <span class="at">limits =</span> <span class="fu">c</span>(<span class="dv">0</span>, <span class="dv">1</span>)) <span class="sc">+</span></span>
-<span id="cb14-11"><a href="#cb14-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
-<span id="cb14-12"><a href="#cb14-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">title =</span> <span class="st">"Game termination type by run"</span>,</span>
-<span id="cb14-13"><a href="#cb14-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">x     =</span> <span class="cn">NULL</span>,</span>
-<span id="cb14-14"><a href="#cb14-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">y     =</span> <span class="st">"Share of games"</span></span>
-<span id="cb14-15"><a href="#cb14-15" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
-<span id="cb14-16"><a href="#cb14-16" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>games_clean <span class="sc">|&gt;</span></span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">count</span>(run_id, terminated_by) <span class="sc">|&gt;</span></span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(run_id) <span class="sc">|&gt;</span></span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">pct =</span> n <span class="sc">/</span> <span class="fu">sum</span>(n)) <span class="sc">|&gt;</span></span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ungroup</span>() <span class="sc">|&gt;</span></span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> terminated_by, <span class="at">y =</span> pct, <span class="at">fill =</span> terminated_by)) <span class="sc">+</span></span>
+<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_col</span>(<span class="at">show.legend =</span> <span class="cn">FALSE</span>) <span class="sc">+</span></span>
+<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_text</span>(<span class="fu">aes</span>(<span class="at">label =</span> scales<span class="sc">::</span><span class="fu">percent</span>(pct, <span class="at">accuracy =</span> <span class="dv">1</span>)), <span class="at">vjust =</span> <span class="sc">-</span><span class="fl">0.3</span>, <span class="at">size =</span> <span class="fl">3.5</span>) <span class="sc">+</span></span>
+<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> run_id, <span class="at">labeller =</span> label_both) <span class="sc">+</span></span>
+<span id="cb13-10"><a href="#cb13-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_continuous</span>(<span class="at">labels =</span> scales<span class="sc">::</span><span class="fu">percent_format</span>(), <span class="at">limits =</span> <span class="fu">c</span>(<span class="dv">0</span>, <span class="dv">1</span>)) <span class="sc">+</span></span>
+<span id="cb13-11"><a href="#cb13-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb13-12"><a href="#cb13-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">title =</span> <span class="st">"Game termination type by run"</span>,</span>
+<span id="cb13-13"><a href="#cb13-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">x     =</span> <span class="cn">NULL</span>,</span>
+<span id="cb13-14"><a href="#cb13-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">y     =</span> <span class="st">"Share of games"</span></span>
+<span id="cb13-15"><a href="#cb13-15" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb13-16"><a href="#cb13-16" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
 <div class="cell-output-display">
 <div>
@@ -444,95 +453,145 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="most-impactful-games" class="level2">
 <h2 class="anchored" data-anchor-id="most-impactful-games">Most Impactful Games</h2>
-<p>Which individual games drove the largest weight change for a given feature? Because TD learning updates weights after every game, some games — depending on their outcome, length, and the positions reached — produce outsized shifts. Identifying these games lets you examine the actual play that taught the engine a concept.</p>
+<p>Which individual games drove the largest weight change for a given feature? Because temporal difference learning updates weights after every game, some games — depending on their outcome, length, and the positions reached — produce outsized shifts. Identifying these games lets you examine the actual play that taught the engine a concept.</p>
 <p>Set <code>FOCUS_FEATURE</code> and <code>TOP_N</code> to explore any feature.</p>
 <div class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a>FOCUS_FEATURE <span class="ot">&lt;-</span> <span class="st">"material_queen"</span>   <span class="co"># feature to examine</span></span>
-<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>TOP_N         <span class="ot">&lt;-</span> <span class="dv">10</span>                 <span class="co"># number of top games to surface</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb14"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a>FOCUS_FEATURE <span class="ot">&lt;-</span> <span class="st">"material_queen"</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>TOP_N         <span class="ot">&lt;-</span> <span class="dv">10</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
 </div>
 <div class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb16"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (<span class="sc">!</span>has_game_records <span class="sc">||</span> <span class="sc">!</span>has_weight_deltas) {</span>
-<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(</span>
-<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>    <span class="st">"game_records and weight_deltas tables not yet populated.</span><span class="sc">\n</span><span class="st">"</span>,</span>
-<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Run selfplay.ipynb (updated version) to generate this data.</span><span class="sc">\n</span><span class="st">"</span></span>
-<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
-<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a>  top_games <span class="ot">&lt;-</span> weight_deltas <span class="sc">|&gt;</span></span>
-<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">filter</span>(feature_name <span class="sc">==</span> FOCUS_FEATURE) <span class="sc">|&gt;</span></span>
-<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(<span class="at">abs_delta =</span> <span class="fu">abs</span>(delta)) <span class="sc">|&gt;</span></span>
-<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">arrange</span>(<span class="fu">desc</span>(abs_delta)) <span class="sc">|&gt;</span></span>
-<span id="cb16-11"><a href="#cb16-11" aria-hidden="true" tabindex="-1"></a>    <span class="fu">slice_head</span>(<span class="at">n =</span> TOP_N) <span class="sc">|&gt;</span></span>
-<span id="cb16-12"><a href="#cb16-12" aria-hidden="true" tabindex="-1"></a>    <span class="fu">left_join</span>(</span>
-<span id="cb16-13"><a href="#cb16-13" aria-hidden="true" tabindex="-1"></a>      game_records <span class="sc">|&gt;</span> <span class="fu">select</span>(run_id, game_number, pgn, td_error),</span>
-<span id="cb16-14"><a href="#cb16-14" aria-hidden="true" tabindex="-1"></a>      <span class="at">by =</span> <span class="fu">c</span>(<span class="st">"run_id"</span>, <span class="st">"game_number"</span>)</span>
-<span id="cb16-15"><a href="#cb16-15" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">|&gt;</span></span>
-<span id="cb16-16"><a href="#cb16-16" aria-hidden="true" tabindex="-1"></a>    <span class="fu">left_join</span>(</span>
-<span id="cb16-17"><a href="#cb16-17" aria-hidden="true" tabindex="-1"></a>      games <span class="sc">|&gt;</span> <span class="fu">select</span>(run_id, game_number, outcome, n_halfmoves),</span>
-<span id="cb16-18"><a href="#cb16-18" aria-hidden="true" tabindex="-1"></a>      <span class="at">by =</span> <span class="fu">c</span>(<span class="st">"run_id"</span>, <span class="st">"game_number"</span>)</span>
-<span id="cb16-19"><a href="#cb16-19" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">|&gt;</span></span>
-<span id="cb16-20"><a href="#cb16-20" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(</span>
-<span id="cb16-21"><a href="#cb16-21" aria-hidden="true" tabindex="-1"></a>      <span class="co"># Extract the move text from PGN (everything after the blank line separator)</span></span>
-<span id="cb16-22"><a href="#cb16-22" aria-hidden="true" tabindex="-1"></a>      <span class="at">moves =</span> <span class="fu">map_chr</span>(pgn, \(p) {</span>
-<span id="cb16-23"><a href="#cb16-23" aria-hidden="true" tabindex="-1"></a>        parts <span class="ot">&lt;-</span> <span class="fu">str_split</span>(p, <span class="st">"</span><span class="sc">\n\n</span><span class="st">"</span>)[[<span class="dv">1</span>]]</span>
-<span id="cb16-24"><a href="#cb16-24" aria-hidden="true" tabindex="-1"></a>        <span class="fu">tail</span>(parts, <span class="dv">1</span>) <span class="sc">|&gt;</span> <span class="fu">str_squish</span>() <span class="sc">|&gt;</span> <span class="fu">str_trunc</span>(<span class="dv">80</span>)</span>
-<span id="cb16-25"><a href="#cb16-25" aria-hidden="true" tabindex="-1"></a>      })</span>
-<span id="cb16-26"><a href="#cb16-26" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">|&gt;</span></span>
-<span id="cb16-27"><a href="#cb16-27" aria-hidden="true" tabindex="-1"></a>    <span class="fu">select</span>(run_id, game_number, outcome, n_halfmoves, delta, td_error, moves)</span>
-<span id="cb16-28"><a href="#cb16-28" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-29"><a href="#cb16-29" aria-hidden="true" tabindex="-1"></a>  top_games <span class="sc">|&gt;</span></span>
-<span id="cb16-30"><a href="#cb16-30" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(<span class="fu">across</span>(<span class="fu">where</span>(is.double), <span class="sc">~</span> <span class="fu">round</span>(., <span class="dv">4</span>))) <span class="sc">|&gt;</span></span>
-<span id="cb16-31"><a href="#cb16-31" aria-hidden="true" tabindex="-1"></a>    knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
-<span id="cb16-32"><a href="#cb16-32" aria-hidden="true" tabindex="-1"></a>      <span class="at">col.names =</span> <span class="fu">c</span>(</span>
-<span id="cb16-33"><a href="#cb16-33" aria-hidden="true" tabindex="-1"></a>        <span class="st">"Run"</span>, <span class="st">"Game"</span>, <span class="st">"Outcome"</span>, <span class="st">"Half-moves"</span>,</span>
-<span id="cb16-34"><a href="#cb16-34" aria-hidden="true" tabindex="-1"></a>        <span class="fu">paste0</span>(<span class="st">"\u0394 "</span>, FOCUS_FEATURE), <span class="st">"TD error"</span>, <span class="st">"Moves (truncated)"</span></span>
-<span id="cb16-35"><a href="#cb16-35" aria-hidden="true" tabindex="-1"></a>      ),</span>
-<span id="cb16-36"><a href="#cb16-36" aria-hidden="true" tabindex="-1"></a>      <span class="at">caption =</span> <span class="fu">paste0</span>(<span class="st">"Top "</span>, TOP_N, <span class="st">" games by |\u0394 "</span>, FOCUS_FEATURE, <span class="st">"|"</span>)</span>
-<span id="cb16-37"><a href="#cb16-37" aria-hidden="true" tabindex="-1"></a>    )</span>
-<span id="cb16-38"><a href="#cb16-38" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (<span class="sc">!</span>has_game_records <span class="sc">||</span> <span class="sc">!</span>has_weight_deltas) {</span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(</span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>    <span class="st">"game_records and weight_deltas tables not yet populated.</span><span class="sc">\n</span><span class="st">"</span>,</span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Run selfplay.ipynb to generate this data.</span><span class="sc">\n</span><span class="st">"</span></span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
+<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a>  top_games <span class="ot">&lt;-</span> weight_deltas <span class="sc">|&gt;</span></span>
+<span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">filter</span>(feature_name <span class="sc">==</span> FOCUS_FEATURE) <span class="sc">|&gt;</span></span>
+<span id="cb15-9"><a href="#cb15-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(<span class="at">abs_delta =</span> <span class="fu">abs</span>(delta)) <span class="sc">|&gt;</span></span>
+<span id="cb15-10"><a href="#cb15-10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">arrange</span>(<span class="fu">desc</span>(abs_delta)) <span class="sc">|&gt;</span></span>
+<span id="cb15-11"><a href="#cb15-11" aria-hidden="true" tabindex="-1"></a>    <span class="fu">slice_head</span>(<span class="at">n =</span> TOP_N) <span class="sc">|&gt;</span></span>
+<span id="cb15-12"><a href="#cb15-12" aria-hidden="true" tabindex="-1"></a>    <span class="fu">left_join</span>(</span>
+<span id="cb15-13"><a href="#cb15-13" aria-hidden="true" tabindex="-1"></a>      game_records <span class="sc">|&gt;</span> <span class="fu">select</span>(run_id, game_number, pgn, td_error),</span>
+<span id="cb15-14"><a href="#cb15-14" aria-hidden="true" tabindex="-1"></a>      <span class="at">by =</span> <span class="fu">c</span>(<span class="st">"run_id"</span>, <span class="st">"game_number"</span>)</span>
+<span id="cb15-15"><a href="#cb15-15" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">|&gt;</span></span>
+<span id="cb15-16"><a href="#cb15-16" aria-hidden="true" tabindex="-1"></a>    <span class="fu">left_join</span>(</span>
+<span id="cb15-17"><a href="#cb15-17" aria-hidden="true" tabindex="-1"></a>      games <span class="sc">|&gt;</span> <span class="fu">select</span>(run_id, game_number, outcome, n_halfmoves),</span>
+<span id="cb15-18"><a href="#cb15-18" aria-hidden="true" tabindex="-1"></a>      <span class="at">by =</span> <span class="fu">c</span>(<span class="st">"run_id"</span>, <span class="st">"game_number"</span>)</span>
+<span id="cb15-19"><a href="#cb15-19" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">|&gt;</span></span>
+<span id="cb15-20"><a href="#cb15-20" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(</span>
+<span id="cb15-21"><a href="#cb15-21" aria-hidden="true" tabindex="-1"></a>      <span class="at">moves =</span> <span class="fu">map_chr</span>(pgn, \(p) {</span>
+<span id="cb15-22"><a href="#cb15-22" aria-hidden="true" tabindex="-1"></a>        parts <span class="ot">&lt;-</span> <span class="fu">str_split</span>(p, <span class="st">"</span><span class="sc">\n\n</span><span class="st">"</span>)[[<span class="dv">1</span>]]</span>
+<span id="cb15-23"><a href="#cb15-23" aria-hidden="true" tabindex="-1"></a>        <span class="fu">tail</span>(parts, <span class="dv">1</span>) <span class="sc">|&gt;</span> <span class="fu">str_squish</span>() <span class="sc">|&gt;</span> <span class="fu">str_trunc</span>(<span class="dv">80</span>)</span>
+<span id="cb15-24"><a href="#cb15-24" aria-hidden="true" tabindex="-1"></a>      })</span>
+<span id="cb15-25"><a href="#cb15-25" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">|&gt;</span></span>
+<span id="cb15-26"><a href="#cb15-26" aria-hidden="true" tabindex="-1"></a>    <span class="fu">select</span>(run_id, game_number, outcome, n_halfmoves, delta, td_error, moves)</span>
+<span id="cb15-27"><a href="#cb15-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-28"><a href="#cb15-28" aria-hidden="true" tabindex="-1"></a>  top_games <span class="sc">|&gt;</span></span>
+<span id="cb15-29"><a href="#cb15-29" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(<span class="fu">across</span>(<span class="fu">where</span>(is.double), <span class="sc">~</span> <span class="fu">round</span>(., <span class="dv">4</span>))) <span class="sc">|&gt;</span></span>
+<span id="cb15-30"><a href="#cb15-30" aria-hidden="true" tabindex="-1"></a>    <span class="fu">flextable</span>() <span class="sc">|&gt;</span></span>
+<span id="cb15-31"><a href="#cb15-31" aria-hidden="true" tabindex="-1"></a>    <span class="fu">set_header_labels</span>(</span>
+<span id="cb15-32"><a href="#cb15-32" aria-hidden="true" tabindex="-1"></a>      <span class="at">run_id      =</span> <span class="st">"Run"</span>,</span>
+<span id="cb15-33"><a href="#cb15-33" aria-hidden="true" tabindex="-1"></a>      <span class="at">game_number =</span> <span class="st">"Game"</span>,</span>
+<span id="cb15-34"><a href="#cb15-34" aria-hidden="true" tabindex="-1"></a>      <span class="at">outcome     =</span> <span class="st">"Outcome"</span>,</span>
+<span id="cb15-35"><a href="#cb15-35" aria-hidden="true" tabindex="-1"></a>      <span class="at">n_halfmoves =</span> <span class="st">"Half-moves"</span>,</span>
+<span id="cb15-36"><a href="#cb15-36" aria-hidden="true" tabindex="-1"></a>      <span class="at">delta       =</span> <span class="fu">paste0</span>(<span class="st">"\u0394 "</span>, FOCUS_FEATURE),</span>
+<span id="cb15-37"><a href="#cb15-37" aria-hidden="true" tabindex="-1"></a>      <span class="at">td_error    =</span> <span class="st">"TD error"</span>,</span>
+<span id="cb15-38"><a href="#cb15-38" aria-hidden="true" tabindex="-1"></a>      <span class="at">moves       =</span> <span class="st">"Moves (truncated)"</span></span>
+<span id="cb15-39"><a href="#cb15-39" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">|&gt;</span></span>
+<span id="cb15-40"><a href="#cb15-40" aria-hidden="true" tabindex="-1"></a>    flextable<span class="sc">::</span><span class="fu">set_caption</span>(<span class="fu">paste0</span>(<span class="st">"Top "</span>, TOP_N, <span class="st">" games by |\u0394 "</span>, FOCUS_FEATURE, <span class="st">"|"</span>)) <span class="sc">|&gt;</span></span>
+<span id="cb15-41"><a href="#cb15-41" aria-hidden="true" tabindex="-1"></a>    <span class="fu">autofit</span>()</span>
+<span id="cb15-42"><a href="#cb15-42" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
-<div class="cell-output cell-output-stdout">
-<pre><code>game_records and weight_deltas tables not yet populated.
- Run selfplay.ipynb (updated version) to generate this data.</code></pre>
+<div class="cell-output-display">
+<div class="tabwid"><style>.cl-abc42330{table-layout:auto;}.cl-abbba250{font-family:'Gill Sans MT';font-size:10pt;font-weight:normal;font-style:normal;text-decoration:none;color:rgba(0, 0, 0, 1.00);background-color:transparent;}.cl-abbef982{margin:0;text-align:right;border-bottom: 0 solid rgba(0, 0, 0, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);padding-bottom:5pt;padding-top:5pt;padding-left:5pt;padding-right:5pt;line-height: 1;background-color:transparent;}.cl-abbef98c{margin:0;text-align:left;border-bottom: 0 solid rgba(0, 0, 0, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);padding-bottom:5pt;padding-top:5pt;padding-left:5pt;padding-right:5pt;line-height: 1;background-color:transparent;}.cl-abbf2736{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 1.5pt solid rgba(102, 102, 102, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf2740{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 1.5pt solid rgba(102, 102, 102, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf2741{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 1.5pt solid rgba(102, 102, 102, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf274a{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 1.5pt solid rgba(102, 102, 102, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf274b{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 1.5pt solid rgba(102, 102, 102, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf2754{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 1.5pt solid rgba(102, 102, 102, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf2755{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 1.5pt solid rgba(102, 102, 102, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf275e{background-color:transparent;vertical-align: middle;border-bottom: 0 solid rgba(0, 0, 0, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf275f{background-color:transparent;vertical-align: middle;border-bottom: 0 solid rgba(0, 0, 0, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf2768{background-color:transparent;vertical-align: middle;border-bottom: 0 solid rgba(0, 0, 0, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf2769{background-color:transparent;vertical-align: middle;border-bottom: 0 solid rgba(0, 0, 0, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf2772{background-color:transparent;vertical-align: middle;border-bottom: 0 solid rgba(0, 0, 0, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf2773{background-color:transparent;vertical-align: middle;border-bottom: 0 solid rgba(0, 0, 0, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf2774{background-color:transparent;vertical-align: middle;border-bottom: 0 solid rgba(0, 0, 0, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf277c{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf277d{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf2786{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf2787{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf2790{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf2791{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-abbf2792{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}</style><table data-quarto-disable-processing="true" class="cl-abc42330"><thead><tr style="overflow-wrap:break-word;"><th class="cl-abbf2736"><p class="cl-abbef982"><span class="cl-abbba250">Run</span></p></th><th class="cl-abbf2740"><p class="cl-abbef982"><span class="cl-abbba250">Game</span></p></th><th class="cl-abbf2741"><p class="cl-abbef98c"><span class="cl-abbba250">Outcome</span></p></th><th class="cl-abbf274a"><p class="cl-abbef982"><span class="cl-abbba250">Half-moves</span></p></th><th class="cl-abbf274b"><p class="cl-abbef982"><span class="cl-abbba250">Δ material_queen</span></p></th><th class="cl-abbf2754"><p class="cl-abbef982"><span class="cl-abbba250">TD error</span></p></th><th class="cl-abbf2755"><p class="cl-abbef98c"><span class="cl-abbba250">Moves (truncated)</span></p></th></tr></thead><tbody><tr style="overflow-wrap:break-word;"><td class="cl-abbf275e"><p class="cl-abbef982"><span class="cl-abbba250">2</span></p></td><td class="cl-abbf275f"><p class="cl-abbef982"><span class="cl-abbba250">1</span></p></td><td class="cl-abbf2768"><p class="cl-abbef98c"><span class="cl-abbba250">0-1</span></p></td><td class="cl-abbf2769"><p class="cl-abbef982"><span class="cl-abbba250">52</span></p></td><td class="cl-abbf2772"><p class="cl-abbef982"><span class="cl-abbba250">-0.0024</span></p></td><td class="cl-abbf2773"><p class="cl-abbef982"><span class="cl-abbba250">0.8828</span></p></td><td class="cl-abbf2774"><p class="cl-abbef98c"><span class="cl-abbba250">1. d4 d5 2. Qd3 Qd6 3. a4 h5 4. h4 a5 5. Kd2 Qf4+ 6. e3 Qxf2+ 7. Ne2 e6 8. Nc...</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-abbf275e"><p class="cl-abbef982"><span class="cl-abbba250">2</span></p></td><td class="cl-abbf275f"><p class="cl-abbef982"><span class="cl-abbba250">2</span></p></td><td class="cl-abbf2768"><p class="cl-abbef98c"><span class="cl-abbba250">0-1</span></p></td><td class="cl-abbf2769"><p class="cl-abbef982"><span class="cl-abbba250">56</span></p></td><td class="cl-abbf2772"><p class="cl-abbef982"><span class="cl-abbba250">0.0000</span></p></td><td class="cl-abbf2773"><p class="cl-abbef982"><span class="cl-abbba250">0.5146</span></p></td><td class="cl-abbf2774"><p class="cl-abbef98c"><span class="cl-abbba250">1. d4 d5 2. Qd3 Qd6 3. Nc3 Nc6 4. Bf4 Qxf4 5. Nf3 Nf6 6. Nxd5 Nxd5 7. e4 Nf6 ...</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-abbf275e"><p class="cl-abbef982"><span class="cl-abbba250">2</span></p></td><td class="cl-abbf275f"><p class="cl-abbef982"><span class="cl-abbba250">3</span></p></td><td class="cl-abbf2768"><p class="cl-abbef98c"><span class="cl-abbba250">0-1</span></p></td><td class="cl-abbf2769"><p class="cl-abbef982"><span class="cl-abbba250">46</span></p></td><td class="cl-abbf2772"><p class="cl-abbef982"><span class="cl-abbba250">0.0000</span></p></td><td class="cl-abbf2773"><p class="cl-abbef982"><span class="cl-abbba250">0.7084</span></p></td><td class="cl-abbf2774"><p class="cl-abbef98c"><span class="cl-abbba250">1. Nf3 Nc6 2. Nc3 Nf6 3. d4 d5 4. Qd3 Qd6 5. Bg5 Bf5 6. Qxf5 Nxd4 7. Nxd4 Ng4...</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-abbf275e"><p class="cl-abbef982"><span class="cl-abbba250">2</span></p></td><td class="cl-abbf275f"><p class="cl-abbef982"><span class="cl-abbba250">4</span></p></td><td class="cl-abbf2768"><p class="cl-abbef98c"><span class="cl-abbba250">1/2-1/2</span></p></td><td class="cl-abbf2769"><p class="cl-abbef982"><span class="cl-abbba250">29</span></p></td><td class="cl-abbf2772"><p class="cl-abbef982"><span class="cl-abbba250">0.0000</span></p></td><td class="cl-abbf2773"><p class="cl-abbef982"><span class="cl-abbba250">0.0195</span></p></td><td class="cl-abbf2774"><p class="cl-abbef98c"><span class="cl-abbba250">1. f4 f5 2. Kf2 Kf7 3. c4 c5 4. Qe1 Qe8 5. e3 e6 6. d3 d6 7. Ke2 Ke7 8. Qd1 K...</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-abbf275e"><p class="cl-abbef982"><span class="cl-abbba250">2</span></p></td><td class="cl-abbf275f"><p class="cl-abbef982"><span class="cl-abbba250">5</span></p></td><td class="cl-abbf2768"><p class="cl-abbef98c"><span class="cl-abbba250">1/2-1/2</span></p></td><td class="cl-abbf2769"><p class="cl-abbef982"><span class="cl-abbba250">29</span></p></td><td class="cl-abbf2772"><p class="cl-abbef982"><span class="cl-abbba250">0.0000</span></p></td><td class="cl-abbf2773"><p class="cl-abbef982"><span class="cl-abbba250">0.0194</span></p></td><td class="cl-abbf2774"><p class="cl-abbef98c"><span class="cl-abbba250">1. f4 f5 2. Kf2 Kf7 3. c4 c5 4. Qe1 Qe8 5. e3 e6 6. d3 d6 7. Ke2 Ke7 8. Qd1 Q...</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-abbf275e"><p class="cl-abbef982"><span class="cl-abbba250">2</span></p></td><td class="cl-abbf275f"><p class="cl-abbef982"><span class="cl-abbba250">6</span></p></td><td class="cl-abbf2768"><p class="cl-abbef98c"><span class="cl-abbba250">1/2-1/2</span></p></td><td class="cl-abbf2769"><p class="cl-abbef982"><span class="cl-abbba250">27</span></p></td><td class="cl-abbf2772"><p class="cl-abbef982"><span class="cl-abbba250">0.0000</span></p></td><td class="cl-abbf2773"><p class="cl-abbef982"><span class="cl-abbba250">0.0196</span></p></td><td class="cl-abbf2774"><p class="cl-abbef98c"><span class="cl-abbba250">1. f4 f5 2. Kf2 Kf7 3. c4 c5 4. Qe1 Qe8 5. e3 e6 6. d3 d6 7. Ke2 Ke7 8. Qd1 K...</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-abbf275e"><p class="cl-abbef982"><span class="cl-abbba250">2</span></p></td><td class="cl-abbf275f"><p class="cl-abbef982"><span class="cl-abbba250">7</span></p></td><td class="cl-abbf2768"><p class="cl-abbef98c"><span class="cl-abbba250">1/2-1/2</span></p></td><td class="cl-abbf2769"><p class="cl-abbef982"><span class="cl-abbba250">27</span></p></td><td class="cl-abbf2772"><p class="cl-abbef982"><span class="cl-abbba250">0.0000</span></p></td><td class="cl-abbf2773"><p class="cl-abbef982"><span class="cl-abbba250">0.0193</span></p></td><td class="cl-abbf2774"><p class="cl-abbef98c"><span class="cl-abbba250">1. f4 f5 2. Kf2 Kf7 3. c4 c5 4. Qe1 Qe8 5. e3 e6 6. d3 d6 7. Ke2 Ke7 8. Qd1 Q...</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-abbf275e"><p class="cl-abbef982"><span class="cl-abbba250">2</span></p></td><td class="cl-abbf275f"><p class="cl-abbef982"><span class="cl-abbba250">8</span></p></td><td class="cl-abbf2768"><p class="cl-abbef98c"><span class="cl-abbba250">1/2-1/2</span></p></td><td class="cl-abbf2769"><p class="cl-abbef982"><span class="cl-abbba250">30</span></p></td><td class="cl-abbf2772"><p class="cl-abbef982"><span class="cl-abbba250">0.0000</span></p></td><td class="cl-abbf2773"><p class="cl-abbef982"><span class="cl-abbba250">0.0204</span></p></td><td class="cl-abbf2774"><p class="cl-abbef98c"><span class="cl-abbba250">1. f4 f5 2. Kf2 Kf7 3. c4 c5 4. Qe1 Qe8 5. e3 e6 6. d3 d6 7. Ke2 Ke7 8. Qd1 Q...</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-abbf275e"><p class="cl-abbef982"><span class="cl-abbba250">2</span></p></td><td class="cl-abbf275f"><p class="cl-abbef982"><span class="cl-abbba250">9</span></p></td><td class="cl-abbf2768"><p class="cl-abbef98c"><span class="cl-abbba250">1/2-1/2</span></p></td><td class="cl-abbf2769"><p class="cl-abbef982"><span class="cl-abbba250">33</span></p></td><td class="cl-abbf2772"><p class="cl-abbef982"><span class="cl-abbba250">0.0000</span></p></td><td class="cl-abbf2773"><p class="cl-abbef982"><span class="cl-abbba250">0.0206</span></p></td><td class="cl-abbf2774"><p class="cl-abbef98c"><span class="cl-abbba250">1. f4 f5 2. Kf2 Kf7 3. c4 c5 4. Qe1 Qe8 5. e3 e6 6. d3 d6 7. Ke2 Ke7 8. Qd1 Q...</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-abbf277c"><p class="cl-abbef982"><span class="cl-abbba250">2</span></p></td><td class="cl-abbf277d"><p class="cl-abbef982"><span class="cl-abbba250">10</span></p></td><td class="cl-abbf2786"><p class="cl-abbef98c"><span class="cl-abbba250">1/2-1/2</span></p></td><td class="cl-abbf2787"><p class="cl-abbef982"><span class="cl-abbba250">30</span></p></td><td class="cl-abbf2790"><p class="cl-abbef982"><span class="cl-abbba250">0.0000</span></p></td><td class="cl-abbf2791"><p class="cl-abbef982"><span class="cl-abbba250">0.0203</span></p></td><td class="cl-abbf2792"><p class="cl-abbef98c"><span class="cl-abbba250">1. f4 f5 2. Kf2 Kf7 3. c4 c5 4. Qe1 Qe8 5. e3 e6 6. d3 d6 7. Ke2 Ke7 8. Qd1 Q...</span></p></td></tr></tbody></table></div>
 </div>
 </div>
 <div class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (has_game_records <span class="sc">&amp;&amp;</span> has_weight_deltas) {</span>
-<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>  delta_series <span class="ot">&lt;-</span> weight_deltas <span class="sc">|&gt;</span></span>
-<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">filter</span>(feature_name <span class="sc">==</span> FOCUS_FEATURE) <span class="sc">|&gt;</span></span>
-<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">left_join</span>(</span>
-<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>      games <span class="sc">|&gt;</span> <span class="fu">select</span>(run_id, game_number, outcome),</span>
-<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a>      <span class="at">by =</span> <span class="fu">c</span>(<span class="st">"run_id"</span>, <span class="st">"game_number"</span>)</span>
-<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">|&gt;</span></span>
-<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(<span class="at">is_top =</span> game_number <span class="sc">%in%</span> top_games<span class="sc">$</span>game_number)</span>
-<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(delta_series, <span class="fu">aes</span>(<span class="at">x =</span> game_number, <span class="at">y =</span> delta)) <span class="sc">+</span></span>
-<span id="cb18-11"><a href="#cb18-11" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_line</span>(<span class="at">colour =</span> <span class="st">"grey75"</span>, <span class="at">linewidth =</span> <span class="fl">0.4</span>) <span class="sc">+</span></span>
-<span id="cb18-12"><a href="#cb18-12" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_point</span>(</span>
-<span id="cb18-13"><a href="#cb18-13" aria-hidden="true" tabindex="-1"></a>      <span class="at">data    =</span> <span class="fu">filter</span>(delta_series, is_top),</span>
-<span id="cb18-14"><a href="#cb18-14" aria-hidden="true" tabindex="-1"></a>      <span class="fu">aes</span>(<span class="at">colour =</span> outcome),</span>
-<span id="cb18-15"><a href="#cb18-15" aria-hidden="true" tabindex="-1"></a>      <span class="at">size    =</span> <span class="fl">2.5</span></span>
-<span id="cb18-16"><a href="#cb18-16" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">+</span></span>
-<span id="cb18-17"><a href="#cb18-17" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_hline</span>(<span class="at">yintercept =</span> <span class="dv">0</span>, <span class="at">linetype =</span> <span class="st">"dashed"</span>, <span class="at">colour =</span> <span class="st">"grey50"</span>) <span class="sc">+</span></span>
-<span id="cb18-18"><a href="#cb18-18" aria-hidden="true" tabindex="-1"></a>    <span class="fu">facet_wrap</span>(<span class="sc">~</span> run_id, <span class="at">labeller =</span> label_both, <span class="at">scales =</span> <span class="st">"free_x"</span>) <span class="sc">+</span></span>
-<span id="cb18-19"><a href="#cb18-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">labs</span>(</span>
-<span id="cb18-20"><a href="#cb18-20" aria-hidden="true" tabindex="-1"></a>      <span class="at">title   =</span> <span class="fu">paste0</span>(<span class="st">"Per-game weight delta: "</span>, FOCUS_FEATURE),</span>
-<span id="cb18-21"><a href="#cb18-21" aria-hidden="true" tabindex="-1"></a>      <span class="at">subtitle =</span> <span class="fu">paste0</span>(<span class="st">"Top "</span>, TOP_N, <span class="st">" most impactful games highlighted"</span>),</span>
-<span id="cb18-22"><a href="#cb18-22" aria-hidden="true" tabindex="-1"></a>      <span class="at">x       =</span> <span class="st">"Game number"</span>,</span>
-<span id="cb18-23"><a href="#cb18-23" aria-hidden="true" tabindex="-1"></a>      <span class="at">y       =</span> <span class="fu">paste0</span>(<span class="st">"\u0394 weight"</span>),</span>
-<span id="cb18-24"><a href="#cb18-24" aria-hidden="true" tabindex="-1"></a>      <span class="at">colour  =</span> <span class="st">"Outcome"</span></span>
-<span id="cb18-25"><a href="#cb18-25" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">+</span></span>
-<span id="cb18-26"><a href="#cb18-26" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>) <span class="sc">+</span></span>
-<span id="cb18-27"><a href="#cb18-27" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>)</span>
-<span id="cb18-28"><a href="#cb18-28" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb16"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (has_game_records <span class="sc">&amp;&amp;</span> has_weight_deltas) {</span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>  delta_series <span class="ot">&lt;-</span> weight_deltas <span class="sc">|&gt;</span></span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">filter</span>(feature_name <span class="sc">==</span> FOCUS_FEATURE) <span class="sc">|&gt;</span></span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">left_join</span>(</span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>      games <span class="sc">|&gt;</span> <span class="fu">select</span>(run_id, game_number, outcome),</span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>      <span class="at">by =</span> <span class="fu">c</span>(<span class="st">"run_id"</span>, <span class="st">"game_number"</span>)</span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">|&gt;</span></span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(<span class="at">is_top =</span> game_number <span class="sc">%in%</span> top_games<span class="sc">$</span>game_number)</span>
+<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(delta_series, <span class="fu">aes</span>(<span class="at">x =</span> game_number, <span class="at">y =</span> delta)) <span class="sc">+</span></span>
+<span id="cb16-11"><a href="#cb16-11" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_line</span>(<span class="at">colour =</span> <span class="st">"grey75"</span>, <span class="at">linewidth =</span> <span class="fl">0.4</span>) <span class="sc">+</span></span>
+<span id="cb16-12"><a href="#cb16-12" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_point</span>(</span>
+<span id="cb16-13"><a href="#cb16-13" aria-hidden="true" tabindex="-1"></a>      <span class="at">data =</span> <span class="fu">filter</span>(delta_series, is_top),</span>
+<span id="cb16-14"><a href="#cb16-14" aria-hidden="true" tabindex="-1"></a>      <span class="fu">aes</span>(<span class="at">colour =</span> outcome),</span>
+<span id="cb16-15"><a href="#cb16-15" aria-hidden="true" tabindex="-1"></a>      <span class="at">size =</span> <span class="fl">2.5</span></span>
+<span id="cb16-16"><a href="#cb16-16" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">+</span></span>
+<span id="cb16-17"><a href="#cb16-17" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_hline</span>(<span class="at">yintercept =</span> <span class="dv">0</span>, <span class="at">linetype =</span> <span class="st">"dashed"</span>, <span class="at">colour =</span> <span class="st">"grey50"</span>) <span class="sc">+</span></span>
+<span id="cb16-18"><a href="#cb16-18" aria-hidden="true" tabindex="-1"></a>    <span class="fu">facet_wrap</span>(<span class="sc">~</span> run_id, <span class="at">labeller =</span> label_both, <span class="at">scales =</span> <span class="st">"free_x"</span>) <span class="sc">+</span></span>
+<span id="cb16-19"><a href="#cb16-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">labs</span>(</span>
+<span id="cb16-20"><a href="#cb16-20" aria-hidden="true" tabindex="-1"></a>      <span class="at">title    =</span> <span class="fu">paste0</span>(<span class="st">"Per-game weight delta: "</span>, FOCUS_FEATURE),</span>
+<span id="cb16-21"><a href="#cb16-21" aria-hidden="true" tabindex="-1"></a>      <span class="at">subtitle =</span> <span class="fu">paste0</span>(<span class="st">"Top "</span>, TOP_N, <span class="st">" most impactful games highlighted"</span>),</span>
+<span id="cb16-22"><a href="#cb16-22" aria-hidden="true" tabindex="-1"></a>      <span class="at">x        =</span> <span class="st">"Game number"</span>,</span>
+<span id="cb16-23"><a href="#cb16-23" aria-hidden="true" tabindex="-1"></a>      <span class="at">y        =</span> <span class="st">"\u0394 weight"</span>,</span>
+<span id="cb16-24"><a href="#cb16-24" aria-hidden="true" tabindex="-1"></a>      <span class="at">colour   =</span> <span class="st">"Outcome"</span></span>
+<span id="cb16-25"><a href="#cb16-25" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">+</span></span>
+<span id="cb16-26"><a href="#cb16-26" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>) <span class="sc">+</span></span>
+<span id="cb16-27"><a href="#cb16-27" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>)</span>
+<span id="cb16-28"><a href="#cb16-28" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="03_visualize_files/figure-html/impactful-games-plot-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
 </div>
+</div>
+</div>
+<section id="per-game-deltas-all-features" class="level3">
+<h3 class="anchored" data-anchor-id="per-game-deltas-all-features">Per-game deltas — all features</h3>
+<p>Weight change each game across all features simultaneously. Each bar is one game; colour shows the outcome. Games with near-zero deltas (mostly draws at early stages) will appear flat — making decisive games visually obvious.</p>
+<div class="cell">
+<details class="code-fold">
+<summary>Code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (has_weight_deltas) {</span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>  weight_deltas <span class="sc">|&gt;</span></span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">filter</span>(run_id <span class="sc">%in%</span> run_ids) <span class="sc">|&gt;</span></span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">left_join</span>(</span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>      games <span class="sc">|&gt;</span> <span class="fu">select</span>(run_id, game_number, outcome),</span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>      <span class="at">by =</span> <span class="fu">c</span>(<span class="st">"run_id"</span>, <span class="st">"game_number"</span>)</span>
+<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">|&gt;</span></span>
+<span id="cb17-8"><a href="#cb17-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(<span class="at">feature_name =</span> <span class="fu">factor</span>(feature_name, <span class="at">levels =</span> FEATURE_ORDER)) <span class="sc">|&gt;</span></span>
+<span id="cb17-9"><a href="#cb17-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> game_number, <span class="at">y =</span> delta, <span class="at">fill =</span> outcome)) <span class="sc">+</span></span>
+<span id="cb17-10"><a href="#cb17-10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_col</span>(<span class="at">width =</span> <span class="fl">0.8</span>) <span class="sc">+</span></span>
+<span id="cb17-11"><a href="#cb17-11" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_hline</span>(<span class="at">yintercept =</span> <span class="dv">0</span>, <span class="at">linetype =</span> <span class="st">"dashed"</span>, <span class="at">colour =</span> <span class="st">"grey60"</span>) <span class="sc">+</span></span>
+<span id="cb17-12"><a href="#cb17-12" aria-hidden="true" tabindex="-1"></a>    <span class="fu">facet_wrap</span>(<span class="sc">~</span> feature_name, <span class="at">scales =</span> <span class="st">"free_y"</span>, <span class="at">ncol =</span> <span class="dv">4</span>) <span class="sc">+</span></span>
+<span id="cb17-13"><a href="#cb17-13" aria-hidden="true" tabindex="-1"></a>    <span class="fu">labs</span>(</span>
+<span id="cb17-14"><a href="#cb17-14" aria-hidden="true" tabindex="-1"></a>      <span class="at">title    =</span> <span class="st">"Per-game weight delta — all features"</span>,</span>
+<span id="cb17-15"><a href="#cb17-15" aria-hidden="true" tabindex="-1"></a>      <span class="at">subtitle =</span> <span class="st">"Each bar = one game; colour = outcome"</span>,</span>
+<span id="cb17-16"><a href="#cb17-16" aria-hidden="true" tabindex="-1"></a>      <span class="at">x        =</span> <span class="st">"Game number"</span>,</span>
+<span id="cb17-17"><a href="#cb17-17" aria-hidden="true" tabindex="-1"></a>      <span class="at">y        =</span> <span class="st">"\u0394 weight"</span>,</span>
+<span id="cb17-18"><a href="#cb17-18" aria-hidden="true" tabindex="-1"></a>      <span class="at">fill     =</span> <span class="st">"Outcome"</span></span>
+<span id="cb17-19"><a href="#cb17-19" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">+</span></span>
+<span id="cb17-20"><a href="#cb17-20" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">11</span>) <span class="sc">+</span></span>
+<span id="cb17-21"><a href="#cb17-21" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>)</span>
+<span id="cb17-22"><a href="#cb17-22" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
+<span id="cb17-23"><a href="#cb17-23" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"weight_deltas table not yet populated.</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb17-24"><a href="#cb17-24" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="03_visualize_files/figure-html/delta-all-features-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+</section>
 </section>
 <section id="feature-outcome-correlation" class="level2">
 <h2 class="anchored" data-anchor-id="feature-outcome-correlation">Feature-Outcome Correlation</h2>
@@ -541,84 +600,85 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <div class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb19"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (<span class="sc">!</span>has_feature_stats <span class="sc">||</span> <span class="fu">nrow</span>(feature_stats) <span class="sc">==</span> <span class="dv">0</span>) {</span>
-<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"No feature_stats data yet. Run a full training run with the updated selfplay.ipynb"</span>,</span>
-<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>      <span class="st">"to populate this table.</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
-<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a>  ROLL_WIN <span class="ot">&lt;-</span> <span class="dv">200</span>  <span class="co"># rolling window for correlation</span></span>
-<span id="cb19-6"><a href="#cb19-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb19-7"><a href="#cb19-7" aria-hidden="true" tabindex="-1"></a>  corr_data <span class="ot">&lt;-</span> feature_stats <span class="sc">|&gt;</span></span>
-<span id="cb19-8"><a href="#cb19-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">left_join</span>(FEATURE_GROUP, <span class="at">by =</span> <span class="st">"feature_name"</span>) <span class="sc">|&gt;</span></span>
-<span id="cb19-9"><a href="#cb19-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(</span>
-<span id="cb19-10"><a href="#cb19-10" aria-hidden="true" tabindex="-1"></a>      <span class="at">outcome_num  =</span> <span class="fu">outcome_numeric</span>(outcome),</span>
-<span id="cb19-11"><a href="#cb19-11" aria-hidden="true" tabindex="-1"></a>      <span class="at">feature_name =</span> <span class="fu">factor</span>(feature_name, <span class="at">levels =</span> FEATURE_ORDER),</span>
-<span id="cb19-12"><a href="#cb19-12" aria-hidden="true" tabindex="-1"></a>      <span class="at">group        =</span> <span class="fu">factor</span>(group, <span class="at">levels =</span> <span class="fu">c</span>(<span class="st">"Material"</span>, <span class="st">"Pawn structure"</span>, <span class="st">"Positional"</span>))</span>
-<span id="cb19-13"><a href="#cb19-13" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">|&gt;</span></span>
-<span id="cb19-14"><a href="#cb19-14" aria-hidden="true" tabindex="-1"></a>    <span class="fu">arrange</span>(run_id, feature_name, game_number) <span class="sc">|&gt;</span></span>
-<span id="cb19-15"><a href="#cb19-15" aria-hidden="true" tabindex="-1"></a>    <span class="fu">group_by</span>(run_id, feature_name, group) <span class="sc">|&gt;</span></span>
-<span id="cb19-16"><a href="#cb19-16" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(</span>
-<span id="cb19-17"><a href="#cb19-17" aria-hidden="true" tabindex="-1"></a>      <span class="at">roll_corr =</span> <span class="fu">roll_cor</span>(mean_value, outcome_num, <span class="at">window =</span> ROLL_WIN)</span>
-<span id="cb19-18"><a href="#cb19-18" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">|&gt;</span></span>
-<span id="cb19-19"><a href="#cb19-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">ungroup</span>()</span>
-<span id="cb19-20"><a href="#cb19-20" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb19-21"><a href="#cb19-21" aria-hidden="true" tabindex="-1"></a>  corr_data <span class="sc">|&gt;</span></span>
-<span id="cb19-22"><a href="#cb19-22" aria-hidden="true" tabindex="-1"></a>    <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> game_number, <span class="at">y =</span> roll_corr, <span class="at">colour =</span> feature_name)) <span class="sc">+</span></span>
-<span id="cb19-23"><a href="#cb19-23" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_line</span>(<span class="at">linewidth =</span> <span class="fl">0.7</span>) <span class="sc">+</span></span>
-<span id="cb19-24"><a href="#cb19-24" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_hline</span>(<span class="at">yintercept =</span> <span class="dv">0</span>, <span class="at">linetype =</span> <span class="st">"dashed"</span>, <span class="at">colour =</span> <span class="st">"grey60"</span>) <span class="sc">+</span></span>
-<span id="cb19-25"><a href="#cb19-25" aria-hidden="true" tabindex="-1"></a>    <span class="fu">facet_grid</span>(group <span class="sc">~</span> run_id, <span class="at">scales =</span> <span class="st">"free_x"</span>) <span class="sc">+</span></span>
-<span id="cb19-26"><a href="#cb19-26" aria-hidden="true" tabindex="-1"></a>    <span class="fu">labs</span>(</span>
-<span id="cb19-27"><a href="#cb19-27" aria-hidden="true" tabindex="-1"></a>      <span class="at">title    =</span> <span class="fu">paste0</span>(<span class="st">"Rolling feature-outcome correlation ("</span>, ROLL_WIN, <span class="st">"-game window)"</span>),</span>
-<span id="cb19-28"><a href="#cb19-28" aria-hidden="true" tabindex="-1"></a>      <span class="at">subtitle =</span> <span class="st">"Positive = higher feature value predicts white wins"</span>,</span>
-<span id="cb19-29"><a href="#cb19-29" aria-hidden="true" tabindex="-1"></a>      <span class="at">x        =</span> <span class="st">"Game number"</span>,</span>
-<span id="cb19-30"><a href="#cb19-30" aria-hidden="true" tabindex="-1"></a>      <span class="at">y        =</span> <span class="st">"Correlation with outcome"</span>,</span>
-<span id="cb19-31"><a href="#cb19-31" aria-hidden="true" tabindex="-1"></a>      <span class="at">colour   =</span> <span class="cn">NULL</span></span>
-<span id="cb19-32"><a href="#cb19-32" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">+</span></span>
-<span id="cb19-33"><a href="#cb19-33" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>) <span class="sc">+</span></span>
-<span id="cb19-34"><a href="#cb19-34" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>)</span>
-<span id="cb19-35"><a href="#cb19-35" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (<span class="sc">!</span>has_feature_stats <span class="sc">||</span> <span class="fu">nrow</span>(feature_stats) <span class="sc">==</span> <span class="dv">0</span>) {</span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"No feature_stats data yet. Run a training session with selfplay.ipynb"</span>,</span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>      <span class="st">"to populate this table.</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>  ROLL_WIN <span class="ot">&lt;-</span> <span class="dv">200</span></span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a>  corr_data <span class="ot">&lt;-</span> feature_stats <span class="sc">|&gt;</span></span>
+<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">left_join</span>(FEATURE_GROUP, <span class="at">by =</span> <span class="st">"feature_name"</span>) <span class="sc">|&gt;</span></span>
+<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(</span>
+<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a>      <span class="at">outcome_num  =</span> <span class="fu">outcome_numeric</span>(outcome),</span>
+<span id="cb18-11"><a href="#cb18-11" aria-hidden="true" tabindex="-1"></a>      <span class="at">feature_name =</span> <span class="fu">factor</span>(feature_name, <span class="at">levels =</span> FEATURE_ORDER),</span>
+<span id="cb18-12"><a href="#cb18-12" aria-hidden="true" tabindex="-1"></a>      <span class="at">group        =</span> <span class="fu">factor</span>(group, <span class="at">levels =</span> ALL_GROUPS)</span>
+<span id="cb18-13"><a href="#cb18-13" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">|&gt;</span></span>
+<span id="cb18-14"><a href="#cb18-14" aria-hidden="true" tabindex="-1"></a>    <span class="fu">arrange</span>(run_id, feature_name, game_number) <span class="sc">|&gt;</span></span>
+<span id="cb18-15"><a href="#cb18-15" aria-hidden="true" tabindex="-1"></a>    <span class="fu">group_by</span>(run_id, feature_name, group) <span class="sc">|&gt;</span></span>
+<span id="cb18-16"><a href="#cb18-16" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(<span class="at">roll_corr =</span> <span class="fu">roll_cor</span>(mean_value, outcome_num, <span class="at">window =</span> ROLL_WIN)) <span class="sc">|&gt;</span></span>
+<span id="cb18-17"><a href="#cb18-17" aria-hidden="true" tabindex="-1"></a>    <span class="fu">ungroup</span>()</span>
+<span id="cb18-18"><a href="#cb18-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-19"><a href="#cb18-19" aria-hidden="true" tabindex="-1"></a>  corr_data <span class="sc">|&gt;</span></span>
+<span id="cb18-20"><a href="#cb18-20" aria-hidden="true" tabindex="-1"></a>    <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> game_number, <span class="at">y =</span> roll_corr, <span class="at">colour =</span> feature_name)) <span class="sc">+</span></span>
+<span id="cb18-21"><a href="#cb18-21" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_line</span>(<span class="at">linewidth =</span> <span class="fl">0.7</span>) <span class="sc">+</span></span>
+<span id="cb18-22"><a href="#cb18-22" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_hline</span>(<span class="at">yintercept =</span> <span class="dv">0</span>, <span class="at">linetype =</span> <span class="st">"dashed"</span>, <span class="at">colour =</span> <span class="st">"grey60"</span>) <span class="sc">+</span></span>
+<span id="cb18-23"><a href="#cb18-23" aria-hidden="true" tabindex="-1"></a>    <span class="fu">facet_grid</span>(group <span class="sc">~</span> run_id, <span class="at">scales =</span> <span class="st">"free_x"</span>) <span class="sc">+</span></span>
+<span id="cb18-24"><a href="#cb18-24" aria-hidden="true" tabindex="-1"></a>    <span class="fu">labs</span>(</span>
+<span id="cb18-25"><a href="#cb18-25" aria-hidden="true" tabindex="-1"></a>      <span class="at">title    =</span> <span class="fu">paste0</span>(<span class="st">"Rolling feature-outcome correlation ("</span>, ROLL_WIN, <span class="st">"-game window)"</span>),</span>
+<span id="cb18-26"><a href="#cb18-26" aria-hidden="true" tabindex="-1"></a>      <span class="at">subtitle =</span> <span class="st">"Positive = higher feature value predicts white wins"</span>,</span>
+<span id="cb18-27"><a href="#cb18-27" aria-hidden="true" tabindex="-1"></a>      <span class="at">x        =</span> <span class="st">"Game number"</span>,</span>
+<span id="cb18-28"><a href="#cb18-28" aria-hidden="true" tabindex="-1"></a>      <span class="at">y        =</span> <span class="st">"Correlation with outcome"</span>,</span>
+<span id="cb18-29"><a href="#cb18-29" aria-hidden="true" tabindex="-1"></a>      <span class="at">colour   =</span> <span class="cn">NULL</span></span>
+<span id="cb18-30"><a href="#cb18-30" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">+</span></span>
+<span id="cb18-31"><a href="#cb18-31" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>) <span class="sc">+</span></span>
+<span id="cb18-32"><a href="#cb18-32" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>)</span>
+<span id="cb18-33"><a href="#cb18-33" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
-<div class="cell-output cell-output-stdout">
-<pre><code>No feature_stats data yet. Run a full training run with the updated selfplay.ipynb to populate this table.</code></pre>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="03_visualize_files/figure-html/feature-outcome-correlation-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
 </div>
 </div>
 </section>
 <section id="cross-run-comparison" class="level2">
 <h2 class="anchored" data-anchor-id="cross-run-comparison">Cross-Run Comparison</h2>
-<p>Concept emergence timing across independent runs — the central research question. A concept is considered “emerged” when its weight or feature-outcome correlation crosses a defined threshold.</p>
+<p>Concept emergence timing across independent runs — the central research question. A concept is considered “emerged” when its weight crosses a defined threshold for the first time.</p>
 <div class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb21"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Weight-based emergence: first game where weight_value &gt; threshold</span></span>
-<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a>EMERGENCE_THRESHOLD <span class="ot">&lt;-</span> <span class="fl">0.1</span></span>
-<span id="cb21-3"><a href="#cb21-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb21-4"><a href="#cb21-4" aria-hidden="true" tabindex="-1"></a>emergence <span class="ot">&lt;-</span> weights <span class="sc">|&gt;</span></span>
-<span id="cb21-5"><a href="#cb21-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">left_join</span>(FEATURE_GROUP, <span class="at">by =</span> <span class="st">"feature_name"</span>) <span class="sc">|&gt;</span></span>
-<span id="cb21-6"><a href="#cb21-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(weight_value <span class="sc">&gt;</span> EMERGENCE_THRESHOLD) <span class="sc">|&gt;</span></span>
-<span id="cb21-7"><a href="#cb21-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(run_id, feature_name, group) <span class="sc">|&gt;</span></span>
-<span id="cb21-8"><a href="#cb21-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarise</span>(<span class="at">emerged_at =</span> <span class="fu">min</span>(game_number), <span class="at">.groups =</span> <span class="st">"drop"</span>) <span class="sc">|&gt;</span></span>
-<span id="cb21-9"><a href="#cb21-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(</span>
-<span id="cb21-10"><a href="#cb21-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">feature_name =</span> <span class="fu">factor</span>(feature_name, <span class="at">levels =</span> FEATURE_ORDER),</span>
-<span id="cb21-11"><a href="#cb21-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">group        =</span> <span class="fu">factor</span>(group, <span class="at">levels =</span> <span class="fu">c</span>(<span class="st">"Material"</span>, <span class="st">"Pawn structure"</span>, <span class="st">"Positional"</span>))</span>
-<span id="cb21-12"><a href="#cb21-12" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb21-13"><a href="#cb21-13" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb21-14"><a href="#cb21-14" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (<span class="fu">nrow</span>(emergence) <span class="sc">==</span> <span class="dv">0</span>) {</span>
-<span id="cb21-15"><a href="#cb21-15" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"No features have yet crossed the emergence threshold ("</span>, EMERGENCE_THRESHOLD, <span class="st">").</span><span class="sc">\n</span><span class="st">"</span>,</span>
-<span id="cb21-16"><a href="#cb21-16" aria-hidden="true" tabindex="-1"></a>      <span class="st">"Run more training games.</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb21-17"><a href="#cb21-17" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
-<span id="cb21-18"><a href="#cb21-18" aria-hidden="true" tabindex="-1"></a>  emergence <span class="sc">|&gt;</span></span>
-<span id="cb21-19"><a href="#cb21-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> emerged_at, <span class="at">y =</span> feature_name, <span class="at">colour =</span> <span class="fu">factor</span>(run_id))) <span class="sc">+</span></span>
-<span id="cb21-20"><a href="#cb21-20" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_point</span>(<span class="at">size =</span> <span class="dv">3</span>) <span class="sc">+</span></span>
-<span id="cb21-21"><a href="#cb21-21" aria-hidden="true" tabindex="-1"></a>    <span class="fu">facet_wrap</span>(<span class="sc">~</span> group, <span class="at">scales =</span> <span class="st">"free_y"</span>, <span class="at">ncol =</span> <span class="dv">1</span>) <span class="sc">+</span></span>
-<span id="cb21-22"><a href="#cb21-22" aria-hidden="true" tabindex="-1"></a>    <span class="fu">labs</span>(</span>
-<span id="cb21-23"><a href="#cb21-23" aria-hidden="true" tabindex="-1"></a>      <span class="at">title    =</span> <span class="fu">paste0</span>(<span class="st">"Concept emergence (weight &gt; "</span>, EMERGENCE_THRESHOLD, <span class="st">")"</span>),</span>
-<span id="cb21-24"><a href="#cb21-24" aria-hidden="true" tabindex="-1"></a>      <span class="at">subtitle =</span> <span class="st">"Each dot = first checkpoint where weight crossed threshold"</span>,</span>
-<span id="cb21-25"><a href="#cb21-25" aria-hidden="true" tabindex="-1"></a>      <span class="at">x        =</span> <span class="st">"Game number"</span>,</span>
-<span id="cb21-26"><a href="#cb21-26" aria-hidden="true" tabindex="-1"></a>      <span class="at">y        =</span> <span class="cn">NULL</span>,</span>
-<span id="cb21-27"><a href="#cb21-27" aria-hidden="true" tabindex="-1"></a>      <span class="at">colour   =</span> <span class="st">"Run"</span></span>
-<span id="cb21-28"><a href="#cb21-28" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">+</span></span>
-<span id="cb21-29"><a href="#cb21-29" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>) <span class="sc">+</span></span>
-<span id="cb21-30"><a href="#cb21-30" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>)</span>
-<span id="cb21-31"><a href="#cb21-31" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb19"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>EMERGENCE_THRESHOLD <span class="ot">&lt;-</span> <span class="fl">0.1</span></span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>emergence <span class="ot">&lt;-</span> weights <span class="sc">|&gt;</span></span>
+<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">left_join</span>(FEATURE_GROUP, <span class="at">by =</span> <span class="st">"feature_name"</span>) <span class="sc">|&gt;</span></span>
+<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(weight_value <span class="sc">&gt;</span> EMERGENCE_THRESHOLD) <span class="sc">|&gt;</span></span>
+<span id="cb19-6"><a href="#cb19-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(run_id, feature_name, group) <span class="sc">|&gt;</span></span>
+<span id="cb19-7"><a href="#cb19-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarise</span>(<span class="at">emerged_at =</span> <span class="fu">min</span>(game_number), <span class="at">.groups =</span> <span class="st">"drop"</span>) <span class="sc">|&gt;</span></span>
+<span id="cb19-8"><a href="#cb19-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(</span>
+<span id="cb19-9"><a href="#cb19-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">feature_name =</span> <span class="fu">factor</span>(feature_name, <span class="at">levels =</span> FEATURE_ORDER),</span>
+<span id="cb19-10"><a href="#cb19-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">group        =</span> <span class="fu">factor</span>(group, <span class="at">levels =</span> ALL_GROUPS)</span>
+<span id="cb19-11"><a href="#cb19-11" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb19-12"><a href="#cb19-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-13"><a href="#cb19-13" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (<span class="fu">nrow</span>(emergence) <span class="sc">==</span> <span class="dv">0</span>) {</span>
+<span id="cb19-14"><a href="#cb19-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"No features have yet crossed the emergence threshold ("</span>, EMERGENCE_THRESHOLD, <span class="st">").</span><span class="sc">\n</span><span class="st">"</span>,</span>
+<span id="cb19-15"><a href="#cb19-15" aria-hidden="true" tabindex="-1"></a>      <span class="st">"Run more training games.</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb19-16"><a href="#cb19-16" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
+<span id="cb19-17"><a href="#cb19-17" aria-hidden="true" tabindex="-1"></a>  emergence <span class="sc">|&gt;</span></span>
+<span id="cb19-18"><a href="#cb19-18" aria-hidden="true" tabindex="-1"></a>    <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> emerged_at, <span class="at">y =</span> feature_name, <span class="at">colour =</span> <span class="fu">factor</span>(run_id))) <span class="sc">+</span></span>
+<span id="cb19-19"><a href="#cb19-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_point</span>(<span class="at">size =</span> <span class="dv">3</span>) <span class="sc">+</span></span>
+<span id="cb19-20"><a href="#cb19-20" aria-hidden="true" tabindex="-1"></a>    <span class="fu">facet_wrap</span>(<span class="sc">~</span> group, <span class="at">scales =</span> <span class="st">"free_y"</span>, <span class="at">ncol =</span> <span class="dv">1</span>) <span class="sc">+</span></span>
+<span id="cb19-21"><a href="#cb19-21" aria-hidden="true" tabindex="-1"></a>    <span class="fu">labs</span>(</span>
+<span id="cb19-22"><a href="#cb19-22" aria-hidden="true" tabindex="-1"></a>      <span class="at">title    =</span> <span class="fu">paste0</span>(<span class="st">"Concept emergence (weight &gt; "</span>, EMERGENCE_THRESHOLD, <span class="st">")"</span>),</span>
+<span id="cb19-23"><a href="#cb19-23" aria-hidden="true" tabindex="-1"></a>      <span class="at">subtitle =</span> <span class="st">"Each dot = first checkpoint where weight crossed threshold"</span>,</span>
+<span id="cb19-24"><a href="#cb19-24" aria-hidden="true" tabindex="-1"></a>      <span class="at">x        =</span> <span class="st">"Game number"</span>,</span>
+<span id="cb19-25"><a href="#cb19-25" aria-hidden="true" tabindex="-1"></a>      <span class="at">y        =</span> <span class="cn">NULL</span>,</span>
+<span id="cb19-26"><a href="#cb19-26" aria-hidden="true" tabindex="-1"></a>      <span class="at">colour   =</span> <span class="st">"Run"</span></span>
+<span id="cb19-27"><a href="#cb19-27" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">+</span></span>
+<span id="cb19-28"><a href="#cb19-28" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>) <span class="sc">+</span></span>
+<span id="cb19-29"><a href="#cb19-29" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>)</span>
+<span id="cb19-30"><a href="#cb19-30" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
 <div class="cell-output-display">
 <div>
@@ -635,123 +695,32 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <div class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb22"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a>weights <span class="sc">|&gt;</span></span>
-<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(run_id) <span class="sc">|&gt;</span></span>
-<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(game_number <span class="sc">==</span> <span class="fu">max</span>(game_number)) <span class="sc">|&gt;</span></span>
-<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ungroup</span>() <span class="sc">|&gt;</span></span>
-<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">left_join</span>(FEATURE_GROUP, <span class="at">by =</span> <span class="st">"feature_name"</span>) <span class="sc">|&gt;</span></span>
-<span id="cb22-6"><a href="#cb22-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">left_join</span>(CANONICAL, <span class="at">by =</span> <span class="st">"feature_name"</span>) <span class="sc">|&gt;</span></span>
-<span id="cb22-7"><a href="#cb22-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(</span>
-<span id="cb22-8"><a href="#cb22-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">feature_name =</span> <span class="fu">factor</span>(feature_name, <span class="at">levels =</span> FEATURE_ORDER),</span>
-<span id="cb22-9"><a href="#cb22-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">group        =</span> <span class="fu">factor</span>(group, <span class="at">levels =</span> <span class="fu">c</span>(<span class="st">"Material"</span>, <span class="st">"Pawn structure"</span>, <span class="st">"Positional"</span>))</span>
-<span id="cb22-10"><a href="#cb22-10" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
-<span id="cb22-11"><a href="#cb22-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">arrange</span>(run_id, group, feature_name) <span class="sc">|&gt;</span></span>
-<span id="cb22-12"><a href="#cb22-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(run_id, group, feature_name, weight_value, canonical_val) <span class="sc">|&gt;</span></span>
-<span id="cb22-13"><a href="#cb22-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="fu">across</span>(<span class="fu">where</span>(is.numeric), <span class="sc">~</span> <span class="fu">round</span>(., <span class="dv">4</span>))) <span class="sc">|&gt;</span></span>
-<span id="cb22-14"><a href="#cb22-14" aria-hidden="true" tabindex="-1"></a>  knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
-<span id="cb22-15"><a href="#cb22-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">col.names =</span> <span class="fu">c</span>(<span class="st">"Run"</span>, <span class="st">"Group"</span>, <span class="st">"Feature"</span>, <span class="st">"Final weight"</span>, <span class="st">"Canonical"</span>),</span>
-<span id="cb22-16"><a href="#cb22-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">caption   =</span> <span class="st">"Final weights vs canonical piece values (material features only)"</span></span>
-<span id="cb22-17"><a href="#cb22-17" aria-hidden="true" tabindex="-1"></a>  )</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a>weights <span class="sc">|&gt;</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(run_id) <span class="sc">|&gt;</span></span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(game_number <span class="sc">==</span> <span class="fu">max</span>(game_number)) <span class="sc">|&gt;</span></span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ungroup</span>() <span class="sc">|&gt;</span></span>
+<span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">left_join</span>(FEATURE_GROUP, <span class="at">by =</span> <span class="st">"feature_name"</span>) <span class="sc">|&gt;</span></span>
+<span id="cb20-6"><a href="#cb20-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">left_join</span>(CANONICAL, <span class="at">by =</span> <span class="st">"feature_name"</span>) <span class="sc">|&gt;</span></span>
+<span id="cb20-7"><a href="#cb20-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(</span>
+<span id="cb20-8"><a href="#cb20-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">feature_name =</span> <span class="fu">factor</span>(feature_name, <span class="at">levels =</span> FEATURE_ORDER),</span>
+<span id="cb20-9"><a href="#cb20-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">group        =</span> <span class="fu">factor</span>(group, <span class="at">levels =</span> ALL_GROUPS)</span>
+<span id="cb20-10"><a href="#cb20-10" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
+<span id="cb20-11"><a href="#cb20-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">arrange</span>(run_id, group, feature_name) <span class="sc">|&gt;</span></span>
+<span id="cb20-12"><a href="#cb20-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(run_id, group, feature_name, weight_value, canonical_val) <span class="sc">|&gt;</span></span>
+<span id="cb20-13"><a href="#cb20-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="fu">across</span>(<span class="fu">where</span>(is.numeric), <span class="sc">~</span> <span class="fu">round</span>(., <span class="dv">4</span>))) <span class="sc">|&gt;</span></span>
+<span id="cb20-14"><a href="#cb20-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">flextable</span>() <span class="sc">|&gt;</span></span>
+<span id="cb20-15"><a href="#cb20-15" aria-hidden="true" tabindex="-1"></a>  <span class="fu">set_header_labels</span>(</span>
+<span id="cb20-16"><a href="#cb20-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">run_id       =</span> <span class="st">"Run"</span>,</span>
+<span id="cb20-17"><a href="#cb20-17" aria-hidden="true" tabindex="-1"></a>    <span class="at">group        =</span> <span class="st">"Group"</span>,</span>
+<span id="cb20-18"><a href="#cb20-18" aria-hidden="true" tabindex="-1"></a>    <span class="at">feature_name =</span> <span class="st">"Feature"</span>,</span>
+<span id="cb20-19"><a href="#cb20-19" aria-hidden="true" tabindex="-1"></a>    <span class="at">weight_value =</span> <span class="st">"Final weight"</span>,</span>
+<span id="cb20-20"><a href="#cb20-20" aria-hidden="true" tabindex="-1"></a>    <span class="at">canonical_val =</span> <span class="st">"Canonical"</span></span>
+<span id="cb20-21"><a href="#cb20-21" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
+<span id="cb20-22"><a href="#cb20-22" aria-hidden="true" tabindex="-1"></a>  flextable<span class="sc">::</span><span class="fu">set_caption</span>(<span class="st">"Final weights vs canonical piece values (material features only)"</span>) <span class="sc">|&gt;</span></span>
+<span id="cb20-23"><a href="#cb20-23" aria-hidden="true" tabindex="-1"></a>  <span class="fu">autofit</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
 <div class="cell-output-display">
-<table class="caption-top table table-sm table-striped small">
-<caption>Final weights vs canonical piece values (material features only)</caption>
-<thead>
-<tr class="header">
-<th style="text-align: right;">Run</th>
-<th style="text-align: left;">Group</th>
-<th style="text-align: left;">Feature</th>
-<th style="text-align: right;">Final weight</th>
-<th style="text-align: right;">Canonical</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td style="text-align: right;">1</td>
-<td style="text-align: left;">Material</td>
-<td style="text-align: left;">material_queen</td>
-<td style="text-align: right;">0.318</td>
-<td style="text-align: right;">9</td>
-</tr>
-<tr class="even">
-<td style="text-align: right;">1</td>
-<td style="text-align: left;">Material</td>
-<td style="text-align: left;">material_rook</td>
-<td style="text-align: right;">0.021</td>
-<td style="text-align: right;">5</td>
-</tr>
-<tr class="odd">
-<td style="text-align: right;">1</td>
-<td style="text-align: left;">Material</td>
-<td style="text-align: left;">material_bishop</td>
-<td style="text-align: right;">0.026</td>
-<td style="text-align: right;">3</td>
-</tr>
-<tr class="even">
-<td style="text-align: right;">1</td>
-<td style="text-align: left;">Material</td>
-<td style="text-align: left;">material_knight</td>
-<td style="text-align: right;">0.067</td>
-<td style="text-align: right;">3</td>
-</tr>
-<tr class="odd">
-<td style="text-align: right;">1</td>
-<td style="text-align: left;">Material</td>
-<td style="text-align: left;">material_pawn</td>
-<td style="text-align: right;">-0.163</td>
-<td style="text-align: right;">1</td>
-</tr>
-<tr class="even">
-<td style="text-align: right;">1</td>
-<td style="text-align: left;">Pawn structure</td>
-<td style="text-align: left;">passed_pawn</td>
-<td style="text-align: right;">-0.161</td>
-<td style="text-align: right;">NA</td>
-</tr>
-<tr class="odd">
-<td style="text-align: right;">1</td>
-<td style="text-align: left;">Pawn structure</td>
-<td style="text-align: left;">doubled_pawn</td>
-<td style="text-align: right;">-0.069</td>
-<td style="text-align: right;">NA</td>
-</tr>
-<tr class="even">
-<td style="text-align: right;">1</td>
-<td style="text-align: left;">Pawn structure</td>
-<td style="text-align: left;">isolated_pawn</td>
-<td style="text-align: right;">-0.112</td>
-<td style="text-align: right;">NA</td>
-</tr>
-<tr class="odd">
-<td style="text-align: right;">1</td>
-<td style="text-align: left;">Positional</td>
-<td style="text-align: left;">king_safety</td>
-<td style="text-align: right;">-0.054</td>
-<td style="text-align: right;">NA</td>
-</tr>
-<tr class="even">
-<td style="text-align: right;">1</td>
-<td style="text-align: left;">Positional</td>
-<td style="text-align: left;">center_control</td>
-<td style="text-align: right;">-0.047</td>
-<td style="text-align: right;">NA</td>
-</tr>
-<tr class="odd">
-<td style="text-align: right;">1</td>
-<td style="text-align: left;">Positional</td>
-<td style="text-align: left;">rook_open_file</td>
-<td style="text-align: right;">-0.044</td>
-<td style="text-align: right;">NA</td>
-</tr>
-<tr class="even">
-<td style="text-align: right;">1</td>
-<td style="text-align: left;">Positional</td>
-<td style="text-align: left;">connected_rooks</td>
-<td style="text-align: right;">-0.048</td>
-<td style="text-align: right;">NA</td>
-</tr>
-</tbody>
-</table>
+<div class="tabwid"><style>.cl-ada24920{table-layout:auto;}.cl-ad98a604{font-family:'Gill Sans MT';font-size:10pt;font-weight:normal;font-style:normal;text-decoration:none;color:rgba(0, 0, 0, 1.00);background-color:transparent;}.cl-ad9c720c{margin:0;text-align:right;border-bottom: 0 solid rgba(0, 0, 0, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);padding-bottom:5pt;padding-top:5pt;padding-left:5pt;padding-right:5pt;line-height: 1;background-color:transparent;}.cl-ad9c7216{margin:0;text-align:left;border-bottom: 0 solid rgba(0, 0, 0, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);padding-bottom:5pt;padding-top:5pt;padding-left:5pt;padding-right:5pt;line-height: 1;background-color:transparent;}.cl-ad9caa92{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 1.5pt solid rgba(102, 102, 102, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-ad9caa9c{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 1.5pt solid rgba(102, 102, 102, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-ad9caaa6{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 1.5pt solid rgba(102, 102, 102, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-ad9caab0{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 1.5pt solid rgba(102, 102, 102, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-ad9caab1{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 1.5pt solid rgba(102, 102, 102, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-ad9caaba{background-color:transparent;vertical-align: middle;border-bottom: 0 solid rgba(0, 0, 0, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-ad9caabb{background-color:transparent;vertical-align: middle;border-bottom: 0 solid rgba(0, 0, 0, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-ad9caabc{background-color:transparent;vertical-align: middle;border-bottom: 0 solid rgba(0, 0, 0, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-ad9caac4{background-color:transparent;vertical-align: middle;border-bottom: 0 solid rgba(0, 0, 0, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-ad9caac5{background-color:transparent;vertical-align: middle;border-bottom: 0 solid rgba(0, 0, 0, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-ad9caace{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-ad9caacf{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-ad9caad8{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-ad9caae2{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}.cl-ad9caae3{background-color:transparent;vertical-align: middle;border-bottom: 1.5pt solid rgba(102, 102, 102, 1.00);border-top: 0 solid rgba(0, 0, 0, 1.00);border-left: 0 solid rgba(0, 0, 0, 1.00);border-right: 0 solid rgba(0, 0, 0, 1.00);margin-bottom:0;margin-top:0;margin-left:0;margin-right:0;}</style><table data-quarto-disable-processing="true" class="cl-ada24920"><thead><tr style="overflow-wrap:break-word;"><th class="cl-ad9caa92"><p class="cl-ad9c720c"><span class="cl-ad98a604">Run</span></p></th><th class="cl-ad9caa9c"><p class="cl-ad9c7216"><span class="cl-ad98a604">Group</span></p></th><th class="cl-ad9caaa6"><p class="cl-ad9c7216"><span class="cl-ad98a604">Feature</span></p></th><th class="cl-ad9caab0"><p class="cl-ad9c720c"><span class="cl-ad98a604">Final weight</span></p></th><th class="cl-ad9caab1"><p class="cl-ad9c720c"><span class="cl-ad98a604">Canonical</span></p></th></tr></thead><tbody><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">1</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Material</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">material_queen</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">0.3185</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604">9</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">1</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Material</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">material_rook</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">0.0210</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604">5</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">1</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Material</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">material_bishop</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">0.0260</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604">3</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">1</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Material</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">material_knight</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">0.0671</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604">3</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">1</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Material</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">material_pawn</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">-0.1627</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604">1</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">1</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Pawn structure</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">passed_pawn</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">-0.1611</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">1</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Pawn structure</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">doubled_pawn</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">-0.0690</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">1</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Pawn structure</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">isolated_pawn</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">-0.1125</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">1</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Positional</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">king_safety</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">-0.0536</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">1</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Positional</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">center_control</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">-0.0466</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">1</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Positional</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">rook_open_file</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">-0.0443</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">1</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Positional</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">connected_rooks</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">-0.0485</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">2</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Material</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">material_queen</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">0.0672</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604">9</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">2</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Material</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">material_rook</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">-0.0041</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604">5</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">2</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Material</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">material_bishop</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">-0.0873</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604">3</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">2</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Material</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">material_knight</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">0.0066</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604">3</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">2</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Material</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">material_pawn</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">0.0913</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604">1</span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">2</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Pawn structure</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">passed_pawn</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">0.0883</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">2</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Pawn structure</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">doubled_pawn</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">-0.0900</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">2</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Pawn structure</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">isolated_pawn</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">0.0261</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">2</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Pawn structure</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">pawn_advancement</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">0.0115</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">2</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Positional</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">king_safety</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">0.0453</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">2</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Positional</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">center_control</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">0.0680</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">2</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Positional</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">rook_open_file</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">0.0262</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">2</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Positional</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">connected_rooks</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">-0.0120</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">2</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Positional</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">rook_seventh</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">-0.0375</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">2</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Coordination &amp; development</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">bishop_pair</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">-0.0834</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caaba"><p class="cl-ad9c720c"><span class="cl-ad98a604">2</span></p></td><td class="cl-ad9caabb"><p class="cl-ad9c7216"><span class="cl-ad98a604">Coordination &amp; development</span></p></td><td class="cl-ad9caabc"><p class="cl-ad9c7216"><span class="cl-ad98a604">piece_development</span></p></td><td class="cl-ad9caac4"><p class="cl-ad9c720c"><span class="cl-ad98a604">-0.0528</span></p></td><td class="cl-ad9caac5"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr><tr style="overflow-wrap:break-word;"><td class="cl-ad9caace"><p class="cl-ad9c720c"><span class="cl-ad98a604">2</span></p></td><td class="cl-ad9caacf"><p class="cl-ad9c7216"><span class="cl-ad98a604">Coordination &amp; development</span></p></td><td class="cl-ad9caad8"><p class="cl-ad9c7216"><span class="cl-ad98a604">mobility</span></p></td><td class="cl-ad9caae2"><p class="cl-ad9c720c"><span class="cl-ad98a604">-0.0213</span></p></td><td class="cl-ad9caae3"><p class="cl-ad9c720c"><span class="cl-ad98a604"></span></p></td></tr></tbody></table></div>
 </div>
 </div>
 </section>

@@ -106,6 +106,11 @@ to the database. The cycle repeats continuously for the duration of a training r
 | `center_control` | Control of e4/d4/e5/d5 | Opening principles |
 | `rook_open_file` | Rooks on files with no pawns | Rook activity |
 | `connected_rooks` | Whether both rooks are on same rank/file | Piece coordination |
+| `bishop_pair` | Having both bishops vs. opponent | Static piece advantage |
+| `rook_seventh` | Rooks on the 7th rank (2nd for black) | Rook infiltration |
+| `piece_development` | Minor pieces off their starting squares | Opening principles |
+| `mobility` | Squares attacked by all non-king pieces | Overall piece activity |
+| `pawn_advancement` | Total rank advancement of all pawns from starting rank | Pawn push tendency |
 
 Features are computed from the perspective of the side to move (positive = good for side to move).
 

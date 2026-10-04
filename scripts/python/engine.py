@@ -36,6 +36,12 @@ FEATURE_NAMES = [
     "center_control",
     "rook_open_file",
     "connected_rooks",
+    # Piece coordination & development
+    "bishop_pair",
+    "rook_seventh",
+    "piece_development",
+    "mobility",
+    "pawn_advancement",
 ]
 
 
@@ -153,6 +159,41 @@ def _are_rooks_connected(board: chess.Board, color: chess.Color) -> bool:
     return False
 
 
+_WHITE_MINOR_STARTS = frozenset({chess.B1, chess.G1, chess.C1, chess.F1})
+_BLACK_MINOR_STARTS = frozenset({chess.B8, chess.G8, chess.C8, chess.F8})
+
+
+def _piece_development(board: chess.Board, color: chess.Color) -> int:
+    """Minor pieces (knights and bishops) that have left their starting squares."""
+    starts = _WHITE_MINOR_STARTS if color == chess.WHITE else _BLACK_MINOR_STARTS
+    minors = board.pieces(chess.KNIGHT, color) | board.pieces(chess.BISHOP, color)
+    return sum(1 for sq in minors if sq not in starts)
+
+
+def _count_rooks_seventh(board: chess.Board, color: chess.Color) -> int:
+    """Rooks on the 7th rank (rank index 6 for white, rank index 1 for black)."""
+    target_rank = 6 if color == chess.WHITE else 1
+    return sum(1 for sq in board.pieces(chess.ROOK, color) if chess.square_rank(sq) == target_rank)
+
+
+def _mobility(board: chess.Board, color: chess.Color) -> int:
+    """Number of squares attacked by all non-king pieces."""
+    return sum(
+        len(board.attacks(sq))
+        for pt in [chess.PAWN, chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN]
+        for sq in board.pieces(pt, color)
+    )
+
+
+def _pawn_advancement(board: chess.Board, color: chess.Color) -> int:
+    """Total rank advancement of all pawns from their starting rank."""
+    total = 0
+    for sq in board.pieces(chess.PAWN, color):
+        rank = chess.square_rank(sq)
+        total += (rank - 1) if color == chess.WHITE else (6 - rank)
+    return total
+
+
 # ---------------------------------------------------------------------------
 # Feature extraction
 # ---------------------------------------------------------------------------
@@ -185,7 +226,14 @@ def extract_features(board: chess.Board) -> dict:
         "king_safety":    _king_safety_score(board, us)    - _king_safety_score(board, them),
         "center_control": _center_control_score(board, us) - _center_control_score(board, them),
         "rook_open_file": _count_rooks_open_file(board, us)- _count_rooks_open_file(board, them),
-        "connected_rooks":int(_are_rooks_connected(board, us)) - int(_are_rooks_connected(board, them)),
+        "connected_rooks":   int(_are_rooks_connected(board, us)) - int(_are_rooks_connected(board, them)),
+
+        # Piece coordination & development
+        "bishop_pair":       int(len(board.pieces(chess.BISHOP, us)) >= 2) - int(len(board.pieces(chess.BISHOP, them)) >= 2),
+        "rook_seventh":      _count_rooks_seventh(board, us)  - _count_rooks_seventh(board, them),
+        "piece_development": _piece_development(board, us)    - _piece_development(board, them),
+        "mobility":          _mobility(board, us)             - _mobility(board, them),
+        "pawn_advancement":  _pawn_advancement(board, us)     - _pawn_advancement(board, them),
     }
 
     return features

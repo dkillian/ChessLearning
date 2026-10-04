@@ -21,6 +21,7 @@ library(here)
 library(knitr)
 library(DBI)
 library(RSQLite)
+library(flextable)
 source("../../../prep (May 2025).r")
 theme_set(base_quarto)
 ```
@@ -31,27 +32,32 @@ theme_set(base_quarto)
 DB_PATH <- if (file.exists("../../data/chess_learning.db")) {
   "../../data/chess_learning.db"
 } else {
-  "data/chess_learning.db"  # fallback for interactive use from project root
+  "data/chess_learning.db"
 }
 
-# Feature groupings for organised display
+# Feature groupings — 17 features across 4 groups
 MATERIAL_FEATURES    <- c("material_queen", "material_rook", "material_bishop",
                            "material_knight", "material_pawn")
-PAWN_FEATURES        <- c("passed_pawn", "doubled_pawn", "isolated_pawn")
-POSITIONAL_FEATURES  <- c("king_safety", "center_control", "rook_open_file", "connected_rooks")
+PAWN_FEATURES        <- c("passed_pawn", "doubled_pawn", "isolated_pawn", "pawn_advancement")
+POSITIONAL_FEATURES  <- c("king_safety", "center_control", "rook_open_file",
+                           "connected_rooks", "rook_seventh")
+DEVELOPMENT_FEATURES <- c("bishop_pair", "piece_development", "mobility")
 
-FEATURE_ORDER <- c(MATERIAL_FEATURES, PAWN_FEATURES, POSITIONAL_FEATURES)
+ALL_GROUPS <- c("Material", "Pawn structure", "Positional", "Coordination & development")
+
+FEATURE_ORDER <- c(MATERIAL_FEATURES, PAWN_FEATURES, POSITIONAL_FEATURES, DEVELOPMENT_FEATURES)
 
 FEATURE_GROUP <- tibble(
   feature_name = FEATURE_ORDER,
   group = c(
-    rep("Material", length(MATERIAL_FEATURES)),
-    rep("Pawn structure", length(PAWN_FEATURES)),
-    rep("Positional", length(POSITIONAL_FEATURES))
+    rep("Material",                   length(MATERIAL_FEATURES)),
+    rep("Pawn structure",             length(PAWN_FEATURES)),
+    rep("Positional",                 length(POSITIONAL_FEATURES)),
+    rep("Coordination & development", length(DEVELOPMENT_FEATURES))
   )
 )
 
-# Canonical piece values (for reference lines)
+# Canonical piece values (for reference lines in material section)
 CANONICAL <- tibble(
   feature_name  = MATERIAL_FEATURES,
   canonical_val = c(9, 5, 3, 3, 1)
@@ -67,7 +73,7 @@ outcome_numeric <- function(outcome) {
   )
 }
 
-# Rolling correlation helper (no extra dependencies needed)
+# Rolling correlation helper
 roll_cor <- function(x, y, window = 100) {
   n <- length(x)
   map_dbl(seq_len(n), function(i) {
@@ -89,19 +95,17 @@ weights <- dbGetQuery(con,
    HAVING rowid = MAX(rowid)"
 )
 
-has_feature_stats  <- dbExistsTable(con, "feature_stats")
-has_game_records   <- dbExistsTable(con, "game_records")
-has_weight_deltas  <- dbExistsTable(con, "weight_deltas")
+has_feature_stats <- dbExistsTable(con, "feature_stats")
+has_game_records  <- dbExistsTable(con, "game_records")
+has_weight_deltas <- dbExistsTable(con, "weight_deltas")
 
 feature_stats <- if (has_feature_stats) dbReadTable(con, "feature_stats") else NULL
 game_records  <- if (has_game_records)  dbReadTable(con, "game_records")  else NULL
 weight_deltas <- if (has_weight_deltas) dbReadTable(con, "weight_deltas") else NULL
 dbDisconnect(con)
 
-# Available run IDs
 run_ids <- sort(unique(games$run_id))
 cat("Runs in database:", paste(run_ids, collapse = ", "), "\n")
-cat("Games per run:\n")
 games |> count(run_id) |> print()
 ```
 
@@ -116,10 +120,9 @@ weights_tidy <- weights |>
   left_join(FEATURE_GROUP, by = "feature_name") |>
   mutate(
     feature_name = factor(feature_name, levels = FEATURE_ORDER),
-    group        = factor(group, levels = c("Material", "Pawn structure", "Positional"))
+    group        = factor(group, levels = ALL_GROUPS)
   )
 
-# One plot per group so y-scales can breathe
 plot_weight_group <- function(grp) {
   weights_tidy |>
     filter(group == grp) |>
@@ -128,10 +131,10 @@ plot_weight_group <- function(grp) {
     geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
     facet_wrap(~ run_id, labeller = label_both, scales = "free_x") +
     labs(
-      title    = paste(grp, "weights over training"),
-      x        = "Game number",
-      y        = "Weight value",
-      colour   = NULL
+      title  = paste(grp, "weights over training"),
+      x      = "Game number",
+      y      = "Weight value",
+      colour = NULL
     ) +
     theme_minimal(base_size = 12) +
     theme(legend.position = "bottom")
@@ -140,6 +143,7 @@ plot_weight_group <- function(grp) {
 plot_weight_group("Material")
 plot_weight_group("Pawn structure")
 plot_weight_group("Positional")
+plot_weight_group("Coordination & development")
 ```
 
 ### Material weights vs canonical values
@@ -149,8 +153,6 @@ pawn=1. This panel shows whether the *relative* ordering of material weights is
 converging toward the accepted hierarchy.
 
 ```{r material-vs-canonical}
-# Normalise weights within each run/checkpoint by dividing by the pawn weight
-# (only where pawn weight != 0, to avoid division by zero)
 weights |>
   filter(feature_name %in% MATERIAL_FEATURES) |>
   pivot_wider(names_from = feature_name, values_from = weight_value) |>
@@ -168,10 +170,10 @@ weights |>
   ) +
   facet_wrap(~ run_id, labeller = label_both, scales = "free_x") +
   labs(
-    title    = "Material weights normalised to pawn (dotted = canonical value)",
-    x        = "Game number",
-    y        = "Weight relative to |pawn weight|",
-    colour   = NULL
+    title  = "Material weights normalised to pawn (dotted = canonical value)",
+    x      = "Game number",
+    y      = "Weight relative to |pawn weight|",
+    colour = NULL
   ) +
   theme_minimal(base_size = 12) +
   theme(legend.position = "bottom")
@@ -190,7 +192,6 @@ games_clean <- games |>
     .default = "Other"
   ))
 
-# Rolling window size (in games)
 WIN <- 50
 
 games_rolling <- games_clean |>
@@ -198,11 +199,9 @@ games_rolling <- games_clean |>
   group_by(run_id) |>
   mutate(
     white_win  = (outcome == "1-0"),
-    black_win  = (outcome == "0-1"),
     draw       = (outcome == "1/2-1/2"),
-    decisive   = white_win | black_win,
-    roll_white = slider::slide_dbl(white_win, mean, .before = WIN - 1, .complete = FALSE),
-    roll_draw  = slider::slide_dbl(draw,      mean, .before = WIN - 1, .complete = FALSE),
+    roll_white = slider::slide_dbl(white_win,   mean, .before = WIN - 1, .complete = FALSE),
+    roll_draw  = slider::slide_dbl(draw,        mean, .before = WIN - 1, .complete = FALSE),
     roll_len   = slider::slide_dbl(n_halfmoves, mean, .before = WIN - 1, .complete = FALSE)
   ) |>
   ungroup()
@@ -270,15 +269,15 @@ games lets you examine the actual play that taught the engine a concept.
 Set `FOCUS_FEATURE` and `TOP_N` to explore any feature.
 
 ```{r impactful-games-setup}
-FOCUS_FEATURE <- "material_queen"   # feature to examine
-TOP_N         <- 10                 # number of top games to surface
+FOCUS_FEATURE <- "material_queen"
+TOP_N         <- 10
 ```
 
 ```{r impactful-games-table}
 if (!has_game_records || !has_weight_deltas) {
   cat(
     "game_records and weight_deltas tables not yet populated.\n",
-    "Run selfplay.ipynb (updated version) to generate this data.\n"
+    "Run selfplay.ipynb to generate this data.\n"
   )
 } else {
   top_games <- weight_deltas |>
@@ -295,7 +294,6 @@ if (!has_game_records || !has_weight_deltas) {
       by = c("run_id", "game_number")
     ) |>
     mutate(
-      # Extract the move text from PGN (everything after the blank line separator)
       moves = map_chr(pgn, \(p) {
         parts <- str_split(p, "\n\n")[[1]]
         tail(parts, 1) |> str_squish() |> str_trunc(80)
@@ -305,13 +303,18 @@ if (!has_game_records || !has_weight_deltas) {
 
   top_games |>
     mutate(across(where(is.double), ~ round(., 4))) |>
-    knitr::kable(
-      col.names = c(
-        "Run", "Game", "Outcome", "Half-moves",
-        paste0("\u0394 ", FOCUS_FEATURE), "TD error", "Moves (truncated)"
-      ),
-      caption = paste0("Top ", TOP_N, " games by |\u0394 ", FOCUS_FEATURE, "|")
-    )
+    flextable() |>
+    set_header_labels(
+      run_id      = "Run",
+      game_number = "Game",
+      outcome     = "Outcome",
+      n_halfmoves = "Half-moves",
+      delta       = paste0("\u0394 ", FOCUS_FEATURE),
+      td_error    = "TD error",
+      moves       = "Moves (truncated)"
+    ) |>
+    flextable::set_caption(paste0("Top ", TOP_N, " games by |\u0394 ", FOCUS_FEATURE, "|")) |>
+    autofit()
 }
 ```
 
@@ -328,21 +331,54 @@ if (has_game_records && has_weight_deltas) {
   ggplot(delta_series, aes(x = game_number, y = delta)) +
     geom_line(colour = "grey75", linewidth = 0.4) +
     geom_point(
-      data    = filter(delta_series, is_top),
+      data = filter(delta_series, is_top),
       aes(colour = outcome),
-      size    = 2.5
+      size = 2.5
     ) +
     geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
     facet_wrap(~ run_id, labeller = label_both, scales = "free_x") +
     labs(
-      title   = paste0("Per-game weight delta: ", FOCUS_FEATURE),
+      title    = paste0("Per-game weight delta: ", FOCUS_FEATURE),
       subtitle = paste0("Top ", TOP_N, " most impactful games highlighted"),
-      x       = "Game number",
-      y       = paste0("\u0394 weight"),
-      colour  = "Outcome"
+      x        = "Game number",
+      y        = "\u0394 weight",
+      colour   = "Outcome"
     ) +
     theme_minimal(base_size = 12) +
     theme(legend.position = "bottom")
+}
+```
+
+### Per-game deltas — all features
+
+Weight change each game across all features simultaneously. Each bar is one game;
+colour shows the outcome. Games with near-zero deltas (mostly draws at early stages)
+will appear flat — making decisive games visually obvious.
+
+```{r delta-all-features, fig.height=10}
+if (has_weight_deltas) {
+  weight_deltas |>
+    filter(run_id %in% run_ids) |>
+    left_join(
+      games |> select(run_id, game_number, outcome),
+      by = c("run_id", "game_number")
+    ) |>
+    mutate(feature_name = factor(feature_name, levels = FEATURE_ORDER)) |>
+    ggplot(aes(x = game_number, y = delta, fill = outcome)) +
+    geom_col(width = 0.8) +
+    geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
+    facet_wrap(~ feature_name, scales = "free_y", ncol = 4) +
+    labs(
+      title    = "Per-game weight delta — all features",
+      subtitle = "Each bar = one game; colour = outcome",
+      x        = "Game number",
+      y        = "\u0394 weight",
+      fill     = "Outcome"
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(legend.position = "bottom")
+} else {
+  cat("weight_deltas table not yet populated.\n")
 }
 ```
 
@@ -359,23 +395,21 @@ than noise.
 
 ```{r feature-outcome-correlation}
 if (!has_feature_stats || nrow(feature_stats) == 0) {
-  cat("No feature_stats data yet. Run a full training run with the updated selfplay.ipynb",
+  cat("No feature_stats data yet. Run a training session with selfplay.ipynb",
       "to populate this table.\n")
 } else {
-  ROLL_WIN <- 200  # rolling window for correlation
+  ROLL_WIN <- 200
 
   corr_data <- feature_stats |>
     left_join(FEATURE_GROUP, by = "feature_name") |>
     mutate(
       outcome_num  = outcome_numeric(outcome),
       feature_name = factor(feature_name, levels = FEATURE_ORDER),
-      group        = factor(group, levels = c("Material", "Pawn structure", "Positional"))
+      group        = factor(group, levels = ALL_GROUPS)
     ) |>
     arrange(run_id, feature_name, game_number) |>
     group_by(run_id, feature_name, group) |>
-    mutate(
-      roll_corr = roll_cor(mean_value, outcome_num, window = ROLL_WIN)
-    ) |>
+    mutate(roll_corr = roll_cor(mean_value, outcome_num, window = ROLL_WIN)) |>
     ungroup()
 
   corr_data |>
@@ -398,11 +432,10 @@ if (!has_feature_stats || nrow(feature_stats) == 0) {
 ## Cross-Run Comparison
 
 Concept emergence timing across independent runs — the central research question.
-A concept is considered "emerged" when its weight or feature-outcome correlation
-crosses a defined threshold.
+A concept is considered "emerged" when its weight crosses a defined threshold for
+the first time.
 
 ```{r concept-emergence}
-# Weight-based emergence: first game where weight_value > threshold
 EMERGENCE_THRESHOLD <- 0.1
 
 emergence <- weights |>
@@ -412,7 +445,7 @@ emergence <- weights |>
   summarise(emerged_at = min(game_number), .groups = "drop") |>
   mutate(
     feature_name = factor(feature_name, levels = FEATURE_ORDER),
-    group        = factor(group, levels = c("Material", "Pawn structure", "Positional"))
+    group        = factor(group, levels = ALL_GROUPS)
   )
 
 if (nrow(emergence) == 0) {
@@ -448,13 +481,19 @@ weights |>
   left_join(CANONICAL, by = "feature_name") |>
   mutate(
     feature_name = factor(feature_name, levels = FEATURE_ORDER),
-    group        = factor(group, levels = c("Material", "Pawn structure", "Positional"))
+    group        = factor(group, levels = ALL_GROUPS)
   ) |>
   arrange(run_id, group, feature_name) |>
   select(run_id, group, feature_name, weight_value, canonical_val) |>
   mutate(across(where(is.numeric), ~ round(., 4))) |>
-  knitr::kable(
-    col.names = c("Run", "Group", "Feature", "Final weight", "Canonical"),
-    caption   = "Final weights vs canonical piece values (material features only)"
-  )
+  flextable() |>
+  set_header_labels(
+    run_id       = "Run",
+    group        = "Group",
+    feature_name = "Feature",
+    weight_value = "Final weight",
+    canonical_val = "Canonical"
+  ) |>
+  flextable::set_caption("Final weights vs canonical piece values (material features only)") |>
+  autofit()
 ```
