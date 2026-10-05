@@ -2,6 +2,21 @@
 
 ---
 
+## Run Registry
+
+Each new run is started when a substantive change is made to the training setup.
+Minor changes within a run (e.g., tranche size, LR adjustment) continue the same run_id via `RESUME = True`.
+
+| run_id | Date | Games | depth | lr | move_limit | weight_init | epsilon | Key Change |
+|--------|------|-------|-------|----|------------|-------------|---------|------------|
+| 1 | 2026-09-29 | 200 | 2 | 0.001 | 200 | random | — | Verification run; baseline pipeline |
+| 2 | 2026-10-03 | 900 | 2 | 0.001→0.01 | 200 | random | — | Full run; diagnosed draw equilibrium; tested higher LR |
+| 3 | 2026-10-04 | 200 | 2 | 0.001 | 200 | canonical | — | Warm-start + removed `board.can_claim_draw()`; draws persisted via rook-shuffle repetition |
+| 4 | 2026-10-04 | 100 | 2 | 0.001 | 200 | canonical (×1) | 0.1 | Epsilon-greedy; 23% decisive rate; material weights eroded (scale mismatch) |
+| 5 | 2026-10-04 | 50 | 2 | 0.001 | 200 | canonical (÷10) | 0.1 | Feature normalization fix; clean 50-game tranche; 18% decisive rate; no weight explosion |
+
+---
+
 ## Session 1 — September 29, 2026
 
 ### What We Worked On
@@ -214,3 +229,127 @@ Choose one (or more) of these interventions to break the draw equilibrium:
 4. **Warm-start weights** — initialize material weights at canonical values
    (queen=9, rook=5, bishop=3, knight=3, pawn=1); engine plays purposefully
    from game 1, and we observe positional concept learning on top of correct material
+
+---
+
+## Session 5 — October 4, 2026
+
+### What We Worked On
+
+- Reviewed documentation and confirmed draw equilibrium diagnosis from Session 4
+- Fixed `ChessLearningConversations.md`: sessions were out of chronological order;
+  reordered to Session 1 → 2 & 3 → 4 → 5
+- Ran tranche 4: 50 games at LEARNING_RATE=0.01 (10× increase), RESUME=True
+
+### Key Finding: Higher LR Made Erosion Worse
+
+- All 50 games were draws (1/2–1/2) — no decisive games generated
+- Median max |delta| only slightly higher than tranche 3 (0.00047 vs 0.00029)
+- One spike: max |delta| = 0.044, nearly matching tranche 1 — LR is high enough
+  to learn from decisive games, but none occurred
+- Several features now have wrong signs after amplified draw erosion:
+  `material_bishop` (–0.087), `material_rook` (–0.003), `rook_seventh` (–0.036),
+  `piece_development` (–0.049), `bishop_pair` (–0.083)
+- Conclusion: higher LR alone is not the right fix; it amplifies draw erosion
+  without generating decisive games
+
+### Steps for Next Session
+
+Applied both interventions in this session — see continuation below.
+
+---
+
+## Session 5 (continued) — October 4, 2026
+
+### What We Worked On
+
+- Applied both draw-equilibrium interventions simultaneously:
+  1. Removed `board.can_claim_draw()` from `play_game()` in `selfplay.ipynb` so games
+     play to checkmate or the hard 200-halfmove cap (no more optional draw claims)
+  2. Warm-started weights at canonical piece values: queen=9, rook=5, bishop=3, knight=3, pawn=1
+- Started run_id = 3: depth=2, lr=0.001, move_limit=200, WEIGHT_INIT='canonical'
+- Ran two tranches of 100 games each (200 games total); RESUME=True for second tranche
+
+### Key Finding: Draws Persist via Natural Termination
+
+- 200 games: 199 draws, 1 white win (1-0) — 99.5% draw rate
+- All games ended via `terminated_by = 'natural'` (not move cap)
+- Average game length: 28.3 half-moves — very short
+- Material weights held near canonical values (queen≈9.0, rook≈4.9, bishop≈3.0, knight≈3.0, pawn≈0.93)
+- Positional weights noisy/wrong-signed: `king_safety` (–0.156), `passed_pawn` (–0.080),
+  `mobility` (–0.075), `rook_open_file` (–0.040), `bishop_pair` (–0.002)
+- Conclusion: removing draw claims shifted termination from claimed draws to natural draws
+  (stalemate, threefold repetition enforced by python-chess); root cause not yet eliminated
+
+### Steps for Next Session
+
+Investigate why draws persist and choose next intervention:
+
+1. **Diagnose natural draw types** — inspect PGN game records to determine whether
+   games are ending by stalemate, threefold repetition (automatic), or 75-move rule
+2. **Add randomization / exploration** — epsilon-greedy random moves to break
+   repetitive patterns and generate more decisive outcomes
+3. **Adjust move limit** — reduce hard cap to force more decisive outcomes sooner
+
+---
+
+## Session 6 — October 4, 2026
+
+### What We Worked On
+
+- Ran run_id = 5 (50 games) and discovered contamination: a prior undocumented
+  attempt at run_id = 5 had already written data to the database, causing duplicate
+  game records (games 1–50 doubled) and inflated weights
+- Diagnosed the root cause of prior weight explosion: `mobility` and `pawn_advancement`
+  features had raw values up to ±30 and ±40, respectively — far outside the [−1, +1]
+  TD target range — creating prediction errors of 5–8× and driving weights to the ±50
+  clip ceiling within 10 games
+- Applied feature normalization fix: `mobility` ÷ 30, `pawn_advancement` ÷ 10 in
+  `extract_features()`, bringing both into the ±1 range consistent with material features
+- Updated `engine.py` and `engine.ipynb` with the normalization (also brought
+  `engine.ipynb` up to date with the 5 features added in Session 4 that it was missing)
+- Deleted all contaminated run_id = 5 data (7 tables, ~309k rows) and re-ran clean
+  50-game tranche
+
+### Key Findings
+
+- **No weight explosion**: max weight magnitude is ±0.41 — normalization fix confirmed working
+- **18% decisive rate**: 9 decisive out of 50 games — real improvement over earlier runs
+- **Correct signs on core material features**: queen (+0.23), rook (+0.10), bishop (+0.07),
+  pawn (+0.01) — all positive as expected
+- **Wrong signs on several features**: `material_knight` (−0.12), `mobility` (−0.41),
+  `passed_pawn` (−0.07) — likely noise at 50 games
+- **Draw erosion persists**: queen started at 0.90 (canonical), eroded to 0.23 after
+  50 games — 41 draws are pulling all weights toward zero faster than 9 decisive
+  games can reinforce correct values
+
+### What Was Changed
+
+- `scripts/python/engine.py`: `mobility` ÷ 30.0, `pawn_advancement` ÷ 10.0 in
+  `extract_features()`; normalization comment added
+- `scripts/python/engine.ipynb`: same normalization applied; also added the 5 features
+  missing since Session 4 (`bishop_pair`, `rook_seventh`, `piece_development`,
+  `mobility`, `pawn_advancement`)
+
+### Risks & Uncertainties
+
+- Draw erosion remains the dominant force at 50 games; unclear whether the decisive-game
+  signal will accumulate fast enough to stabilize correct weight signs at larger scale
+- `mobility` weight (−0.41) being large and wrong-signed is concerning — may reflect
+  genuine noise in 9 decisive games, or a structural artifact of the feature
+- Whether 18% decisive rate is sufficient for meaningful learning over a full run
+  remains to be seen
+
+### Steps for Next Session
+
+1. **Implement reduced draw learning rate** — scale draw updates to ~5% of the
+   decisive-game rate (e.g., effective LR of 0.00005 on draws vs. 0.001 on decisive
+   games). This minimizes erosion while preserving a small calibration signal that
+   keeps V anchored near 0 for balanced positions. Full draw-skip was considered but
+   rejected: without any draw feedback, the evaluator loses calibration for equal
+   positions and may assign confidently non-zero scores to objectively drawn positions.
+2. **Longer-term architectural fix**: switch from Monte Carlo updates (final outcome as
+   target for every position) to true TD(0) bootstrapping (target for position t =
+   evaluator's own prediction at position t+1). This eliminates large error accumulation
+   across positions and naturally reduces erosion without special casing draws.
+3. Re-render `03_visualize.qmd` against run 5 data to inspect weight trajectories

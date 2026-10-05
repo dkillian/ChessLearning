@@ -55,6 +55,18 @@ def default_weights(init: str = "zero") -> dict:
         return {name: 0.0 for name in FEATURE_NAMES}
     elif init == "random":
         return {name: random.uniform(-0.1, 0.1) for name in FEATURE_NAMES}
+    elif init == "canonical":
+        # Seed material weights at piece values scaled to the TD target range [-1, +1].
+        # Traditional values (1, 3, 3, 5, 9) are divided by 10 so that a one-piece
+        # material advantage yields a prediction near the target magnitude (~0.1–0.9),
+        # avoiding the scale mismatch that causes weight erosion in decisive games.
+        weights = {name: 0.0 for name in FEATURE_NAMES}
+        weights["material_pawn"]   = 0.1
+        weights["material_knight"] = 0.3
+        weights["material_bishop"] = 0.3
+        weights["material_rook"]   = 0.5
+        weights["material_queen"]  = 0.9
+        return weights
     raise ValueError(f"Unknown init mode: {init!r}")
 
 
@@ -232,8 +244,11 @@ def extract_features(board: chess.Board) -> dict:
         "bishop_pair":       int(len(board.pieces(chess.BISHOP, us)) >= 2) - int(len(board.pieces(chess.BISHOP, them)) >= 2),
         "rook_seventh":      _count_rooks_seventh(board, us)  - _count_rooks_seventh(board, them),
         "piece_development": _piece_development(board, us)    - _piece_development(board, them),
-        "mobility":          _mobility(board, us)             - _mobility(board, them),
-        "pawn_advancement":  _pawn_advancement(board, us)     - _pawn_advancement(board, them),
+        # Normalized: raw differences can reach ±30 and ±40 respectively, which creates
+        # prediction errors far outside the [-1, +1] TD target range and causes weight explosion.
+        # Dividing brings typical values to ±1, matching the scale of material features.
+        "mobility":         (_mobility(board, us)          - _mobility(board, them))         / 30.0,
+        "pawn_advancement": (_pawn_advancement(board, us)  - _pawn_advancement(board, them)) / 10.0,
     }
 
     return features
@@ -253,7 +268,7 @@ def evaluate(board: chess.Board, weights: dict) -> float:
     """
     if board.is_checkmate():
         return -10_000.0
-    if board.is_stalemate() or board.is_insufficient_material() or board.can_claim_draw():
+    if board.is_stalemate() or board.is_insufficient_material():
         return 0.0
 
     features = extract_features(board)
