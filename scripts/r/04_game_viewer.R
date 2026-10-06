@@ -26,12 +26,18 @@ DB_PATH <- if (file.exists("../../data/chess_learning.db")) {
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-load_impactful_games <- function(db_path, n = 30) {
+load_impactful_games <- function(db_path, run_id_filter = NULL, n = 30) {
   con <- dbConnect(SQLite(), db_path)
   weight_deltas <- dbReadTable(con, "weight_deltas")
   game_records  <- dbReadTable(con, "game_records")
   games_tbl     <- dbReadTable(con, "games")
   dbDisconnect(con)
+
+  if (!is.null(run_id_filter)) {
+    weight_deltas <- weight_deltas |> filter(run_id == run_id_filter)
+    games_tbl     <- games_tbl     |> filter(run_id == run_id_filter)
+    game_records  <- game_records  |> filter(run_id == run_id_filter)
+  }
 
   weight_deltas |>
     group_by(run_id, game_number) |>
@@ -50,6 +56,13 @@ load_impactful_games <- function(db_path, n = 30) {
     ) |>
     arrange(desc(max_abs_delta)) |>
     head(n)
+}
+
+get_run_ids <- function(db_path) {
+  con     <- dbConnect(SQLite(), db_path)
+  run_ids <- dbGetQuery(con, "SELECT DISTINCT run_id FROM games ORDER BY run_id DESC")$run_id
+  dbDisconnect(con)
+  run_ids
 }
 
 parse_game <- function(pgn_str) {
@@ -88,13 +101,7 @@ board_svg_html <- function(fen, last_move = NULL, flipped = FALSE, size = 390L) 
 
 # ── App data (loaded once at startup) ────────────────────────────────────────
 
-dat <- load_impactful_games(DB_PATH)
-
-game_labels <- sprintf(
-  "Run %d · Game %d | %s | \u0394=%.4f (%s)",
-  dat$run_id, dat$game_number,
-  dat$outcome, dat$max_abs_delta, dat$top_feature
-)
+available_runs <- get_run_ids(DB_PATH)
 
 # ── UI ────────────────────────────────────────────────────────────────────────
 
@@ -106,11 +113,21 @@ ui <- page_sidebar(
     width = 310,
 
     card(
+      card_header("Select run"),
+      selectInput(
+        "run_id", NULL,
+        choices  = available_runs,
+        selected = available_runs[1],
+        width    = "100%"
+      )
+    ),
+
+    card(
       card_header("Select game"),
       selectInput(
         "game_idx", NULL,
-        choices  = setNames(seq_len(nrow(dat)), game_labels),
-        selected = 1,
+        choices  = character(0),
+        selected = NULL,
         width    = "100%"
       )
     ),
@@ -162,9 +179,27 @@ ui <- page_sidebar(
 
 server <- function(input, output, session) {
 
+  # Reload impactful games when run changes
+  dat <- reactive({
+    load_impactful_games(DB_PATH, run_id_filter = as.integer(input$run_id))
+  })
+
+  # Update game selector when run changes
+  observeEvent(dat(), {
+    d <- dat()
+    labels <- sprintf(
+      "Game %d | %s | \u0394=%.4f (%s)",
+      d$game_number, d$outcome, d$max_abs_delta, d$top_feature
+    )
+    updateSelectInput(session, "game_idx",
+                      choices  = setNames(seq_len(nrow(d)), labels),
+                      selected = 1)
+  })
+
   # Parsed game: list of fens, sans, moves
   parsed <- reactive({
-    parse_game(dat$pgn[as.integer(input$game_idx)])
+    req(input$game_idx)
+    parse_game(dat()$pgn[as.integer(input$game_idx)])
   })
 
   # Current move counter: 0 = starting position
@@ -260,7 +295,7 @@ server <- function(input, output, session) {
 
   output$game_info <- renderUI({
     idx <- as.integer(input$game_idx)
-    row <- dat[idx, ]
+    row <- dat()[idx, ]
 
     items <- list(
       "Run"          = row$run_id,

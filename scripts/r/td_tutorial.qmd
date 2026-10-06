@@ -119,12 +119,19 @@ feats <- tibble(feature=names(engine$default_weights("zero")),
                     "Safe squares adjacent to king (not attacked by opponent)",
                     "Central squares (d4, d5, e4, e5) attacked",
                     "Rooks on files with no pawns of either color",
-                    "Both rooks share a rank/file with no pieces between"),
+                    "Both rooks share a rank/file with no pieces between",
+                    "Having both bishops vs. opponent",
+                    "Rooks on the 7th rank (2nd for black)",
+                    "Minor pieces off their starting squares",
+                    "Squares attacked by all non-king pieces (normalized)",
+                    "Total rank advancement of all pawns from starting rank (normalized)"),
                 scoring = c(
                     rep("Our count minus theirs", 6),
                     rep("Our count minus theirs (negated)", 2),
-                    rep("Our count minus theirs", 3),
-                    "1/0 — our minus theirs"),
+                    rep("Our count minus theirs", 4),
+                    rep("1/0 — our minus theirs", 2),
+                    rep("Our count minus theirs", 1),
+                    rep("Our count minus theirs (normalized)", 2)),
                 start=0)
 
 feats %>%
@@ -438,7 +445,7 @@ ggplot(featsL, aes(move, value, color=color)) +
     coord_cartesian(xlim=c(1,7)) +
     scale_x_continuous(breaks=1:7) +
     facet_wrap(~feature, ncol=1) +
-    faceted +
+    faceted_quarto +
     labs(title="Feature values by move")
     #theme(panel.background = element_rect(fill = "#808080"),
      # plot.background  = element_rect(fill = "#808080"))
@@ -469,7 +476,7 @@ ggplot(wtsL, aes(move, value, color=feature)) +
     facet_wrap(~feature, 
                ncol=1,
                scales="free_y") +
-    faceted +
+    faceted_quarto +
     labs(title="Weights by move")
 ```
 
@@ -491,7 +498,7 @@ ggplot(sc, aes(move, score, color=color)) +
     scale_color_manual(values=c("#4A2C17", "#E8D5B7")) +
     scale_x_continuous(breaks=0:9) +
     facet_wrap(~color, ncol=1) +
-    faceted +
+    faceted_quarto +
     labs(title="Scores by move") +
     theme(legend.position="none")
 ```

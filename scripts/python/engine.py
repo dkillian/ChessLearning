@@ -20,15 +20,9 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 
 FEATURE_NAMES = [
-    # Material
-    "material_pawn",
-    "material_knight",
-    "material_bishop",
-    "material_rook",
-    "material_queen",
     # Pawn structure
     "passed_pawn",
-    "doubled_pawn",     # structured as a penalty: positive weight = bad doubled pawns hurt
+    "doubled_pawn",     # penalty: positive weight = bad doubled pawns hurt
     "isolated_pawn",    # same convention
     # King safety
     "king_safety",      # safe squares adjacent to king
@@ -44,29 +38,30 @@ FEATURE_NAMES = [
     "pawn_advancement",
 ]
 
+# Piece values hard-coded as prior knowledge — not learned.
+# Scaled to the TD target range [-1, +1]: traditional values (1, 3, 3, 5, 9) ÷ 10.
+PIECE_VALUES = {
+    chess.PAWN:   0.1,
+    chess.KNIGHT: 0.3,
+    chess.BISHOP: 0.3,
+    chess.ROOK:   0.5,
+    chess.QUEEN:  0.9,
+}
+
 
 def default_weights(init: str = "zero") -> dict:
     """
-    Return a weight dict for all features.
-    init='zero'   -- all weights start at 0 (learns from scratch)
-    init='random' -- small random values to break symmetry
+    Return a weight dict for all learnable (positional) features.
+    Material is no longer a learnable feature — it is hard-coded in evaluate().
+
+    init='zero'      -- all weights start at 0
+    init='random'    -- small random values to break symmetry
+    init='canonical' -- alias for 'zero' (positional priors are zero)
     """
-    if init == "zero":
+    if init in ("zero", "canonical"):
         return {name: 0.0 for name in FEATURE_NAMES}
     elif init == "random":
         return {name: random.uniform(-0.1, 0.1) for name in FEATURE_NAMES}
-    elif init == "canonical":
-        # Seed material weights at piece values scaled to the TD target range [-1, +1].
-        # Traditional values (1, 3, 3, 5, 9) are divided by 10 so that a one-piece
-        # material advantage yields a prediction near the target magnitude (~0.1–0.9),
-        # avoiding the scale mismatch that causes weight erosion in decisive games.
-        weights = {name: 0.0 for name in FEATURE_NAMES}
-        weights["material_pawn"]   = 0.1
-        weights["material_knight"] = 0.3
-        weights["material_bishop"] = 0.3
-        weights["material_rook"]   = 0.5
-        weights["material_queen"]  = 0.9
-        return weights
     raise ValueError(f"Unknown init mode: {init!r}")
 
 
@@ -222,13 +217,6 @@ def extract_features(board: chess.Board) -> dict:
     them = not us
 
     features = {
-        # Material: our count minus their count
-        "material_pawn":   len(board.pieces(chess.PAWN,   us)) - len(board.pieces(chess.PAWN,   them)),
-        "material_knight": len(board.pieces(chess.KNIGHT, us)) - len(board.pieces(chess.KNIGHT, them)),
-        "material_bishop": len(board.pieces(chess.BISHOP, us)) - len(board.pieces(chess.BISHOP, them)),
-        "material_rook":   len(board.pieces(chess.ROOK,   us)) - len(board.pieces(chess.ROOK,   them)),
-        "material_queen":  len(board.pieces(chess.QUEEN,  us)) - len(board.pieces(chess.QUEEN,  them)),
-
         # Pawn structure (passed = good; doubled/isolated = bad, so negate)
         "passed_pawn":   _count_passed_pawns(board, us)   - _count_passed_pawns(board, them),
         "doubled_pawn":  -(_count_doubled_pawns(board, us) - _count_doubled_pawns(board, them)),
@@ -271,8 +259,19 @@ def evaluate(board: chess.Board, weights: dict) -> float:
     if board.is_stalemate() or board.is_insufficient_material():
         return 0.0
 
+    us   = board.turn
+    them = not us
+
+    # Hard-coded material score (not learned)
+    material = sum(
+        value * (len(board.pieces(pt, us)) - len(board.pieces(pt, them)))
+        for pt, value in PIECE_VALUES.items()
+    )
+
     features = extract_features(board)
-    return sum(weights.get(name, 0.0) * val for name, val in features.items())
+    positional = sum(weights.get(name, 0.0) * val for name, val in features.items())
+
+    return material + positional
 
 
 # ---------------------------------------------------------------------------
