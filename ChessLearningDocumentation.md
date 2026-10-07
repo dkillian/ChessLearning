@@ -244,3 +244,14 @@ Chess Learning/                        ← Repo root
 - What search depth is feasible within 10-hour run time?
 - Should weights be initialized at zero or with small random values?
 - How frequently to checkpoint weights? (every 10 games? 100 games?)
+
+---
+
+## Feature Improvement Candidates
+
+Ideas to consider for a future run. Changing features mid-study would break cross-run
+comparability, so these are deferred until a new experimental series begins.
+
+| Feature | Issue | Proposed improvement |
+|---|---|---|
+| `center_control` | Currently counts only *attacks* on the four center squares (d4, d5, e4, e5). A pawn physically occupying a center square is not credited — 1.e4 scores for attacking d5 diagonally, not for occupying e4. | Add a separate occupation term: `+1` per center square occupied by a friendly pawn. Classical chess theory treats occupation as stronger than attack. |

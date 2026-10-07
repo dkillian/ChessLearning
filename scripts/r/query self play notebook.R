@@ -2,6 +2,7 @@ library(DBI)
 library(RSQLite)
 
 con <- dbConnect(SQLite(), "data/chess_learning.db")
+#dbDisconnect(con)
 
 # Helpers ----
 

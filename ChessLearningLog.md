@@ -571,3 +571,147 @@ Final state of run_id=11 at ~850 games:
    pruning; use depth=3 for the illustrative game tree (recommended for pedagogy)
 3. If depth=3 looks stable, assess whether the architecture is ready for the
    30-run experimental design
+
+---
+
+## Session 9 — October 6, 2026
+
+### What We Worked On
+
+- Reviewed activity documentation
+- Assessed run_id=12 (depth=3) at ~552 games using `query self play notebook.R`
+
+### Key Finding: Depth=3 Confirms "Depth-2 Artifact" Hypothesis
+
+**Decisive rate: 84.2%** (0-1: 225, 1-0: 240, draws: 87) — up from 78% in run_id=11 at depth=2.
+White wins slightly exceed black wins (43.5% vs 40.8%), consistent with first-mover advantage at greater depth.
+
+**`connected_rooks` corrected to positive sign (+0.012)** at depth=3, after being persistently
+negative (−0.007) throughout all depth=2 runs. This confirms the Session 8 hypothesis that
+`connected_rooks`, `doubled_pawn`, and `pawn_advancement` were depth-2 artifacts.
+
+**Positional weights at max checkpoint (~500 games):**
+
+| Feature | run_id=12 (~500 ckpt) | run_id=11 (~850 games) | Sign |
+|---|---|---|---|
+| `mobility` | +0.151 | +0.14 | ✓ |
+| `passed_pawn` | +0.109 | +0.116 | ✓ |
+| `rook_open_file` | +0.046 | +0.066 | ✓ |
+| `rook_seventh` | +0.040 | +0.046 | ✓ |
+| `king_safety` | +0.017 | +0.038 | ✓ |
+| `piece_development` | +0.017 | +0.021 | ✓ |
+| `connected_rooks` | **+0.012** | −0.007 | ✓ **(corrected at depth=3)** |
+| `center_control` | +0.009 | +0.003 | ✓ |
+| `bishop_pair` | +0.006 | +0.047 | ✓ |
+| `isolated_pawn` | +0.004 | +0.057 | ✓ |
+| `doubled_pawn` | −0.015 | −0.026 | ✗ |
+| `pawn_advancement` | −0.037 | −0.038 | ✗ |
+
+`isolated_pawn` and `bishop_pair` are smaller than in run_id=11 at comparable scale —
+run_id=12 is still at ~500 games, and run_id=11 showed these features strengthen
+between games 50 and 850. Likely to develop further.
+
+`doubled_pawn` and `pawn_advancement` remain wrong-signed. Unclear whether these
+are also depth artifacts or genuinely slow learners; need more games at depth=3 to assess.
+
+### Additional Work Completed This Session (Evening)
+
+The session continued significantly after the initial log entry above. Key additions:
+
+**Tooling ecosystem built:**
+- `negamax_tutorial.qmd` — Quarto tutorial: game trees, minimax/negamax, alpha-beta pruning with Mermaid diagrams, worked example using live run_id=12 weights
+- `05_move_scorer.R` — parameterized script: score all legal moves from any FEN at configurable depth/run
+- `05_search_explorer.R` — Shiny app: interactive move scorer with board navigation and move ranking bar chart
+- `06_search_mechanics.R` — step-by-step R walkthrough: board evaluation feature-by-feature (feature × weight contribution table), negamax depth-by-depth from depth=0 through depth=3
+- `06_stockfish_arena.R` — Shiny app: Live Game (our engine vs Stockfish, real-time board animation) and ELO Benchmark (batch matches, win-rate chart, interpolated ELO estimate, trajectory across checkpoints)
+- `07_human_play.R` — Shiny app: human vs engine with real TD(0) weight updates to a new run; live diagnostics (feature × weight table, evaluation trajectory chart) and post-game analysis (weight delta chart, top-3 learning moments, TD error vs self-play distribution)
+
+**Stockfish 19 installed and integrated:**
+- Installed via `winget install Stockfish.Stockfish`
+- Confirmed working via python-chess; `SF_PATH` auto-detected from WinGet packages directory
+- `stockfish_evals` DB table added (source = `'benchmark'` or `'live'`)
+
+**Key analytical findings:**
+- `center_control` feature only counts attacks, not pawn occupation — 1.e4 scores 1 (for attacking d5) rather than for occupying e4. Recorded in Feature Improvement Candidates in ChessLearningDocumentation.md.
+- Depth-0 opening move scores: mobility dominates (~0.037 contribution), piece development second (~0.019); all other features near zero at move 1
+- Random mover baseline: 20W/0L/0D at every checkpoint from game 100–600 — ceiling effect, baseline is useless. `BASELINE_EVERY` set to `None` going forward.
+
+**Overnight jobs running at session close:**
+- run_id=12 training: games 700 → 1200 (500-game tranche, `BASELINE_EVERY=None`)
+- Stockfish ELO benchmark: first run at 3 ELO levels (1000, 1200, 1400), 10 games each, depth=3 — slow (~70 min) due to long games against Stockfish; patch queued
+
+### Steps for Next Session
+
+1. **Check benchmark results** — view win-rate chart in `06_stockfish_arena.R`; patch `move_limit` 200 → 80 and default `bm_n_games` 10 → 5 before next benchmark run
+2. **Assess run_id=12 at game 1200** — check decisive rate, weight signs for `doubled_pawn` and `pawn_advancement`, compare weights to game 700
+3. **Consider replacing `BASELINE_EVERY`** with Stockfish-at-low-ELO evaluation in `selfplay_td0.ipynb` for future runs (more discriminating than random mover)
+4. **30-run experimental design** — assess readiness; weights appear stable at depth=3
+
+---
+
+## Session 10 — October 7, 2026
+
+### run_id=12 Assessment at Game 1200
+
+Decisive rate dropped from 84.2% (game 600) to **80.4%** (game 1200). Draw rate climbed to 19.6%.
+Black now outperforms White (42.6% vs 37.8%), a reversal from game 600.
+
+**Weight changes game 700 → 1200:**
+
+| Feature | Game 700 | Game 1200 | Status |
+|---|---|---|---|
+| `mobility` | +0.151 | **+0.250** | ✓ but surging — dominating evaluation |
+| `passed_pawn` | +0.109 | +0.083 | ✓ |
+| `pawn_advancement` | −0.037 | **−0.103** | ✗ worsening fast |
+| `doubled_pawn` | −0.015 | **−0.044** | ✗ worsening |
+| `center_control` | +0.009 | **−0.001** | ✗ **crossed zero** — new wrong sign |
+| `bishop_pair` | +0.006 | +0.024 | ✓ growing |
+| `isolated_pawn` | +0.004 | +0.019 | ✓ growing |
+
+Correct signs: 9/12 (was 10/12 at game 700 — `center_control` crossed zero).
+`mobility` at 0.250 is ~3× the next feature, raising structural concerns.
+These patterns suggest feature design issues may need to be addressed before a 30-run study.
+
+### Stockfish Benchmark — Resolution
+
+Three successive benchmark hangs in Shiny diagnosed and resolved:
+- Root causes: synchronous observer blocking session, missing `ponder=FALSE`, `move_limit=200` too high
+- **Fix:** moved benchmark to standalone script `05_stockfish_benchmark.R` designed as an RStudio background job
+- Arena app (`06_stockfish_arena.R`) is now read-only (polls DB every 30s for new results)
+- Key discovery: **Stockfish 19 minimum UCI_Elo = 1320** (not 1000 as assumed)
+- First successful result: **0W/1L/0D vs Stockfish 1320** — engine ELO is below 1320
+
+**PGN capture added:** each benchmark game is now stored in `stockfish_games` DB table with full PGN.
+Games can be reviewed in `04_game_viewer.R` via the "Stockfish vs Engine" source toggle.
+
+### Arena App Bug Fixes
+
+`06_stockfish_arena.R` Live Game tab had persistent reactive context error:
+- First fix: replaced `invalidateLater + isolate` with `reactiveTimer(600)`
+- Final fix: replaced `current_board()` reactive expression calls inside `advance_one_move()` with `make_board_now()` — a plain function reading `move_history()` (a reactiveVal) directly, avoiding the reactive context requirement
+
+### Game Viewer Enhancements (`04_game_viewer.R`)
+
+- **Source toggle**: "Self-play" vs "Stockfish vs Engine" — each with appropriate selectors
+- **"Why this move?" panel** (button-triggered):
+  - Depth selector + Analyze button
+  - Bar chart of all legal moves scored at the position (played move highlighted ★)
+  - Feature breakdown table: Feature | Weight | Move1 (Value | Contrib) | Move2 | Move3
+- **Search tree** (Graphviz DOT via `grViz()`):
+  - Top-3 branches per level, 3 levels deep
+  - Blue box = candidate move; orange diamond = opponent responses; green ellipse = our replies
+
+### New: `selfplay_softmax.ipynb`
+
+Built from `selfplay_td0.ipynb` by Python JSON editing. Key changes:
+- **Softmax selection** replaces epsilon-greedy: scores top-N candidates, samples proportionally to $$e^{s_i/\tau}$$
+- **Style modifiers**: 5 presets (neutral, attacking, cautious, reckless, positional) — each a delta vector added to weights during move selection only, leaving the TD learning signal unchanged
+- Config: `STYLE='neutral'`, `TEMPERATURE=0.05`, `N_CANDIDATES=10`, `RUN_ID=13`
+
+### Steps for Next Session
+
+1. **Open `selfplay_softmax.ipynb`** — verify config (RUN_ID=13, STYLE='neutral'), run initial tranche (~500 games)
+2. **Run Stockfish benchmark** via `05_stockfish_benchmark.R` as a background job after games complete
+3. **Compare run_id=13 vs run_id=12**: decisive rate, weight trajectories, ELO — does softmax improve over epsilon-greedy?
+4. **Investigate feature design issues**: why do `doubled_pawn` and `pawn_advancement` persistently show wrong signs? Consider looking at which game positions drive their updates.
+5. **Style variant run**: once neutral baseline is established, try a style variant (e.g., `attacking`) and compare convergence

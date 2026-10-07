@@ -1,0 +1,471 @@
+---
+title: "How the Chess Engine Chooses a Move"
+subtitle: "Negamax search with alpha-beta pruning"
+author: "Dan Killian, with Posit AI"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    code-fold: true
+    theme: cosmo
+    fig-height: 4
+    fig-width: 7
+    mermaid-format: js
+execute:
+  warning: false
+  message: false
+  error: false
+editor:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+library(DBI)
+library(RSQLite)
+source("../../../prep (May 2025).R")
+theme_set(base_quarto)
+
+engine  <- reticulate::import_from_path("engine", path = "../python")
+chess_m <- reticulate::import("chess")
+```
+
+## Overview
+
+The chess engine has two jobs. The first job — covered in the TD
+learning tutorial — is **evaluation**: given any board position, assign
+a score representing how good it looks for the side to move.
+
+The second job is **move selection**: given 20 or 30 legal options, pick
+the best one. Evaluation alone can't do this. The move that immediately
+looks best (high score after one move) might walk into a trap the
+opponent springs on the very next turn. The engine needs to look
+further ahead.
+
+By the end of this tutorial you should understand:
+
+-   Why a one-move horizon is not enough to play chess well
+-   How the game tree represents all possible sequences of moves
+-   How the negamax algorithm searches that tree
+-   How alpha-beta pruning eliminates most of the search without
+    changing the result
+-   How this plays out on a real chess position
+
+---
+
+## Why One Move Ahead Isn't Enough
+
+Consider the board after **1. e4 e5 2. Bc4 Nc6** — White is looking for
+a move. Suppose White's evaluation function slightly favors positions
+where the queen is active. Playing **3. Qh5** gives the queen a
+prominent square and might score well in a one-move evaluation.
+
+But the *reason* Qh5 is strong is not the queen's immediate position —
+it's the threat on f7 that follows. If Black blunders with 3... Nf6??,
+then 4. Qxf7# is checkmate. A one-move evaluation can't see that. It
+takes three half-moves of lookahead (White plays, Black responds, White
+delivers checkmate) to detect the threat.
+
+The engine handles this by building a **game tree**: a branching
+structure of all positions reachable over the next several moves.
+
+---
+
+## The Game Tree
+
+Each node in the tree is a board position. The root is the current
+position. Edges are legal moves. The tree fans out to some fixed
+**depth** — in this project, depth = 3.
+
+```{mermaid}
+graph TD
+    R["<b>Root</b> — White to move<br/>maximize · returns <b>5</b> · picks Move A"]
+
+    A["<b>Move A</b> — Black to move<br/>minimize · returns <b>5</b>"]
+    B["<b>Move B</b> — Black to move<br/>minimize · returns <b>4</b>"]
+
+    A1["A → White to move<br/>maximize · returns <b>5</b>"]
+    A2["A → White to move<br/>maximize · returns <b>9</b>"]
+    B1["B → White to move<br/>maximize · returns <b>4</b>"]
+    B2["B → White to move<br/>maximize · returns <b>7</b>"]
+
+    LA1["3"]
+    LA2["5"]
+    LA3["9"]
+    LA4["1"]
+    LB1["2"]
+    LB2["4"]
+    LB3["7"]
+    LB4["6"]
+
+    R --> A & B
+    A --> A1 & A2
+    B --> B1 & B2
+    A1 --> LA1 & LA2
+    A2 --> LA3 & LA4
+    B1 --> LB1 & LB2
+    B2 --> LB3 & LB4
+```
+
+Leaf nodes (bottom row) are evaluated by the evaluation function — they
+have no children, so there is no more lookahead. Their scores are in
+White's favour if positive. Interior nodes are not evaluated directly;
+instead, their score **backs up** from their children:
+
+-   At **White's turn** (depth 3, 1), White picks the child with the
+    **highest** score.
+-   At **Black's turn** (depth 2), Black picks the child with the
+    **lowest** score — Black is trying to minimise White's advantage.
+
+Working from the bottom up in the diagram:
+
+| Node | Calculation | Value |
+|------|-------------|-------|
+| A1   | max(3, 5)   | 5     |
+| A2   | max(9, 1)   | 9     |
+| A    | min(5, 9)   | 5     |
+| B1   | max(2, 4)   | 4     |
+| B2   | max(7, 6)   | 7     |
+| B    | min(4, 7)   | 4     |
+| Root | max(5, 4)   | **5** — picks Move A |
+
+White chooses Move A because it leads to the best outcome assuming both
+sides play optimally.
+
+::: {.callout-note}
+This diagram uses a branching factor of 2 for readability. A real chess
+position has 20–30 legal moves per side. At depth 3, the full tree
+would have up to 30³ = **27,000 leaf nodes**.
+:::
+
+---
+
+## Negamax: Always Maximise
+
+The minimax algorithm above has two cases: White maximises, Black
+minimises. **Negamax** collapses these into a single rule: *always
+maximise, but negate the child's score when returning it.*
+
+The key insight is that what is good for the opponent is bad for you.
+If a position has value +5 for the player who just moved, it has value
+−5 for the player who must respond. So after each move, we flip the
+sign.
+
+```python
+def negamax(board, depth, alpha, beta, weights):
+    if board.is_game_over():
+        return -10_000.0 if board.is_checkmate() else 0.0
+    if depth == 0:
+        return evaluate(board, weights)   # score for the side to move
+
+    max_score = float("-inf")
+    for move in board.legal_moves:
+        board.push(move)
+        score = -negamax(board, depth - 1, -beta, -alpha, weights)
+        board.pop()
+        if score > max_score:
+            max_score = score
+        if score > alpha:
+            alpha = score
+        if alpha >= beta:
+            break
+    return max_score
+```
+
+The `evaluate()` call at depth = 0 returns a score **from the
+perspective of the side to move** — positive means good for whoever is
+about to play. The negation on the recursive call (`-negamax(...)`)
+performs the perspective flip: the score returned by the child is from
+the child's side's view, so we negate it to get the parent's view.
+
+---
+
+## Alpha-Beta Pruning
+
+At depth 3 with branching factor 30, the naive tree has ~27,000 leaves.
+Alpha-beta pruning eliminates branches that cannot affect the final
+answer.
+
+Two parameters track the search:
+
+-   **α (alpha)**: the best score the current player can *guarantee* so
+    far (the floor).
+-   **β (beta)**: the best score the *opponent* can guarantee — if our
+    score exceeds this, the opponent will never let us reach this branch
+    (the ceiling).
+
+When **α ≥ β**, the branch is abandoned. There are two ways this
+happens:
+
+**Beta cutoff (inside A2 below):** White is searching A2 and finds a
+leaf scoring 9. Black (the A node) already knows it can hold White to 5
+via A1. Any further search in A2 can only help White — but Black would
+never choose A2 anyway. Remaining A2 children are skipped.
+
+**Alpha cutoff (B2 below):** After fully evaluating B1, Black's best
+return from Move B is ≤ 4. White's α is already 5 (from Move A). White
+would never choose Move B regardless of what B2 contains. B2 is skipped
+entirely.
+
+```{mermaid}
+graph TD
+    R["<b>Root</b> — White · α=−∞, β=+∞<br/>returns <b>5</b>, α → 5 · picks Move A"]
+
+    A["<b>Move A</b> — Black · α=−∞, β=+∞<br/>β → 5 after A1 · returns <b>5</b>"]
+    B["<b>Move B</b> — Black · α=5 inherited<br/>β → 4 after B1 · α ≥ β · pruned!"]
+
+    A1["A1 · White<br/>returns <b>5</b>"]
+    A2["A2 · White · β=5<br/>9 ≥ β · cutoff!<br/>returns ≥ 9"]
+    B1["B1 · White · α=5<br/>returns <b>4</b>"]
+    B2(["✗  B2 — never explored<br/>α=5 ≥ β=4"])
+
+    LA1["3 ✓"]
+    LA2["5 ✓"]
+    LA3["9 ✓ → cutoff"]
+    LA4(["1 ✗  skipped"])
+    LB1["2 ✓"]
+    LB2["4 ✓"]
+    LB3(["7 ✗  skipped"])
+    LB4(["6 ✗  skipped"])
+
+    R --> A & B
+    A --> A1 & A2
+    B --> B1
+    B -.-> B2
+    A1 --> LA1 & LA2
+    A2 --> LA3
+    A2 -.-> LA4
+    B1 --> LB1 & LB2
+    B2 -.-> LB3 & LB4
+```
+
+Result: **5 of 8 leaves** were evaluated (leaves 1, 7, 6 skipped — 37%
+savings). In practice, with 30 legal moves per side and depth = 3, good
+move ordering reduces evaluations from ~27,000 to roughly **1,700** —
+a 16× speedup — without changing the result.
+
+::: {.callout-tip}
+## Move ordering matters
+
+Alpha-beta is most effective when strong moves are searched first,
+because a high α is established early and prunes more aggressively.
+The engine uses `randomize=True` in `get_best_move()` to break ties
+randomly, which also prevents repetitive openings. A production engine
+would use more sophisticated ordering (e.g. captures first, then checks).
+:::
+
+---
+
+## The Code
+
+Here are the two search functions from `engine.py`. `negamax()` does
+the recursive tree search; `get_best_move()` calls it for every root
+move and returns the best one.
+
+```python
+def negamax(board, depth, alpha, beta, weights):
+    """
+    Negamax search with alpha-beta pruning.
+    Returns the score from the perspective of the side to move.
+    """
+    if board.is_game_over():
+        return -10_000.0 if board.is_checkmate() else 0.0
+
+    if depth == 0:
+        return evaluate(board, weights)
+
+    max_score = float("-inf")
+    for move in board.legal_moves:
+        board.push(move)
+        score = -negamax(board, depth - 1, -beta, -alpha, weights)
+        board.pop()
+
+        if score > max_score:
+            max_score = score
+        if score > alpha:
+            alpha = score
+        if alpha >= beta:
+            break   # Beta cutoff — prune remaining moves
+
+    return max_score
+
+
+def get_best_move(board, weights, depth=2, randomize=True):
+    """
+    Return (best_move, score) for the current side to move.
+    randomize=True shuffles the move list so ties are broken randomly.
+    """
+    moves = list(board.legal_moves)
+    if randomize:
+        random.shuffle(moves)
+
+    best_move  = None
+    best_score = float("-inf")
+    alpha      = float("-inf")
+    beta       = float("inf")
+
+    for move in moves:
+        board.push(move)
+        score = -negamax(board, depth - 1, -beta, -alpha, weights)
+        board.pop()
+
+        if score > best_score:
+            best_score = score
+            best_move  = move
+        if score > alpha:
+            alpha = score
+
+    return best_move, best_score
+```
+
+A few details worth noting:
+
+- **Checkmate returns −10,000.** The side to move is in checkmate, so
+  the score is a large negative number from their perspective. The
+  parent negates this to +10,000 — a decisive win for the side that
+  delivered mate.
+- **`-beta, -alpha` in the recursive call.** The alpha and beta bounds
+  are negated and swapped when passing to the child, because the child
+  is evaluating from the opposite perspective.
+- **Shared α across root moves.** In `get_best_move()`, `alpha` is
+  updated as each root move is evaluated. This makes later root moves
+  faster: any response worse than the current best is cut off
+  immediately.
+
+---
+
+## Worked Example: One Position at Three Depths
+
+We'll place the board after **1. e4 e5 2. Bc4 Nc6** — the setup for
+Scholar's Mate. It's White's move. The engine will score every legal
+move at depth 1 (look one half-move ahead) and depth 2 (look two
+half-moves ahead, including Black's best response).
+
+```{r load-weights}
+con <- dbConnect(SQLite(), "../../data/chess_learning.db")
+
+wt_rows <- dbGetQuery(con, "
+    SELECT feature_name, weight_value
+    FROM weights
+    WHERE run_id = 12
+      AND game_number = (SELECT MAX(game_number) FROM weights WHERE run_id = 12)
+")
+dbDisconnect(con)
+
+weights_py <- as.list(setNames(wt_rows$weight_value, wt_rows$feature_name))
+```
+
+```{r setup-board}
+board <- chess_m$Board()
+for (uci in c("e2e4", "e7e5", "f1c4", "b8c6")) {
+    board$push(chess_m$Move$from_uci(uci))
+}
+
+board  # position after 1. e4 e5 2. Bc4 Nc6
+```
+
+```{r score-moves}
+# Score every legal move at a given depth.
+# Each move is evaluated independently (no shared alpha across moves)
+# so we see the true score for each option.
+score_all_moves <- function(board, weights_py, depth) {
+    moves <- reticulate::iterate(board$legal_moves)
+    tibble(
+        san   = purrr::map_chr(moves, \(m) board$san(m)),
+        uci   = purrr::map_chr(moves, \(m) m$uci()),
+        score = purrr::map_dbl(moves, \(m) {
+            board$push(m)
+            s <- -engine$negamax(board, as.integer(depth - 1), -1e6, 1e6, weights_py)
+            board$pop()
+            s
+        })
+    ) |> arrange(desc(score))
+}
+
+d1 <- score_all_moves(board, weights_py, depth = 1) |>
+    rename(score_d1 = score)
+
+d2 <- score_all_moves(board, weights_py, depth = 2) |>
+    rename(score_d2 = score)
+
+move_scores <- left_join(d1, d2, by = c("san", "uci")) |>
+    mutate(
+        rank_d1 = rank(-score_d1, ties.method = "first"),
+        rank_d2 = rank(-score_d2, ties.method = "first"),
+        rank_shift = rank_d1 - rank_d2   # positive = rose in ranking with lookahead
+    ) |>
+    arrange(rank_d2)
+```
+
+### Move Rankings: Depth 1 vs Depth 2
+
+Each row is one legal White move. Scores are from White's perspective
+(higher = better for White). **Rank shift** shows how a move's ranking
+changes when Black's response is accounted for — a large positive value
+means the move looks better with lookahead than without.
+
+```{r display-table}
+move_scores |>
+    select(Move = san, `Score (d=1)` = score_d1, `Rank (d=1)` = rank_d1,
+           `Score (d=2)` = score_d2, `Rank (d=2)` = rank_d2,
+           `Rank shift` = rank_shift) |>
+    flextable() |>
+    colformat_double(j = c("Score (d=1)", "Score (d=2)"), digits = 3) |>
+    color(
+        j = "Rank shift",
+        color = \(x) ifelse(x > 2, "darkgreen", ifelse(x < -2, "firebrick", "black"))
+    ) |>
+    set_table_properties(layout = "autofit")
+```
+
+### How Depth Changes the Best Move
+
+```{r best-moves}
+cat("Best move at depth 1:", move_scores |> slice_min(rank_d1, n=1) |> pull(san), "\n")
+cat("Best move at depth 2:", move_scores |> slice_min(rank_d2, n=1) |> pull(san), "\n")
+
+# Also run get_best_move at depth 3 — a single efficient call
+best3 <- engine$get_best_move(board, weights_py, 3L, FALSE)
+cat("Best move at depth 3:", best3[[1]]$uci(), "\n")
+```
+
+### Score Distribution
+
+How spread out are the move scores? A wider spread means the engine has
+a stronger preference between its options.
+
+```{r score-plot}
+#| fig-cap: "Each point is one legal move. Depth 1 (immediate evaluation only) vs Depth 2 (with Black's best response)."
+
+move_scores |>
+    select(san, score_d1, score_d2) |>
+    pivot_longer(starts_with("score"), names_to = "depth", values_to = "score") |>
+    mutate(depth = case_when(
+        depth == "score_d1" ~ "Depth 1 — immediate only",
+        depth == "score_d2" ~ "Depth 2 — with Black's response"
+    )) |>
+    ggplot(aes(x = score, y = depth)) +
+    geom_jitter(height = 0.15, alpha = 0.6, size = 2) +
+    labs(
+        x = "Score (White's perspective)",
+        y = NULL,
+        title = "Move score distributions at depth 1 and depth 2"
+    )
+```
+
+---
+
+## What This Means for Learning
+
+The search algorithm is fixed — it does not change across training runs.
+What *does* change are the **weights** inside `evaluate()`. As training
+progresses and the weights better reflect true chess value, the scores
+produced by the evaluation function become more accurate, and
+`get_best_move()` produces stronger play — not because the search
+changed, but because the evaluations it backs up are better.
+
+This separation of **search** (negamax) from **knowledge** (weights) is
+the core architectural choice that makes the learning trajectories
+interpretable: when a weight grows, we know exactly what concept the
+engine has learned to value.

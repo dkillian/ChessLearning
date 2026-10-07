@@ -3,3 +3,16 @@
 .RData
 .Ruserdata
 .positai
+
+# Database (too large for GitHub)
+data/chess_learning.db
+
+# Python cache
+scripts/python/__pycache__/
+
+# Rendered HTML (built from .qmd source)
+scripts/r/*.html
+scripts/r/*_files/
+
+# Scratch files
+nul

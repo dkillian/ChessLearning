@@ -78,11 +78,12 @@ To start a session:
 
 - **Python**: `python-chess` for rules; custom engine for feature extraction, minimax search, TD learning
 - **R**: `tidyverse`, `DBI`, `RSQLite` for visualization and analysis
-- **Storage**: SQLite database at `data/chess_learning.db`
+- **Storage**: SQLite database at `data/chess_learning.db` — 10 tables (runs, games, game_records, weights, weight_deltas, feature_stats, position_logs, baseline_evals, stockfish_evals, stockfish_games); `stockfish_games` created by `05_stockfish_benchmark.R`, not by `setup_database()`
+- **Stockfish 19**: installed via winget; used for ELO benchmarking and live game play; minimum `UCI_Elo` = 1320
 
 ---
 
-## Current Architecture (as of Session 8)
+## Current Architecture (as of Session 10)
 
 ### Engine (`scripts/python/engine.py`)
 - **12 learnable positional features** (material features removed entirely)
@@ -99,7 +100,9 @@ Coordination: `bishop_pair`, `rook_seventh`, `piece_development`, `mobility`
 ### Training Script (`scripts/python/selfplay_td0.ipynb`)
 - **Temporal difference (0) bootstrapping**: target for position t = `-V(s_{t+1})`; terminal uses actual outcome
 - **Per-feature draw LR scales**: `draw_lr_scales = {'king_safety': 0.05}` — king_safety gets 5% LR during draws
+- **`BASELINE_EVERY = None`** — random mover baseline disabled; engine wins 100% at all checkpoints (ceiling effect). Replace with Stockfish-at-low-ELO in future runs.
 - `selfplay_mc.ipynb` preserved as Monte Carlo archive
+- `selfplay_softmax.ipynb` — softmax selection + style modifiers variant (run_id=13+)
 
 ### Key Run History
 | run_id | Games | Depth | Key change | Result |
@@ -109,11 +112,24 @@ Coordination: `bishop_pair`, `rook_seventh`, `piece_development`, `mobility`
 | 7 | 600 | 2 | TD(0) | Erosion reduced; slow linear drift |
 | 10 | 50 | 2 | TD(0) + frozen material | Zero erosion confirmed |
 | 11 | 850 | 2 | Hard-coded material; 12 positional features | **78% decisive; all 8 significant signs correct** |
-| 12 | in progress | 3 | Depth=3; king_safety draw_lr=0.05 | Running at session close |
+| 12 | 1200 | 3 | Depth=3; king_safety draw_lr=0.05 | **84% decisive at game 600; declining to 80.4% at game 1200; center_control crossed zero** |
+| 13 | planned | 3 | Softmax selection (τ=0.05, top-10); style modifiers; `selfplay_softmax.ipynb` | TBD |
 
-### Current Weight State (run_id=11, ~850 games)
-Top positional weights (correct sign): mobility, passed_pawn, rook_open_file, isolated_pawn, bishop_pair, rook_seventh, king_safety
-Persistently wrong sign (depth-2 artifacts): doubled_pawn, pawn_advancement, connected_rooks
+### Current Weight State (run_id=12, game 1200)
+Correct sign (9/12): mobility (+0.250 — dominating), passed_pawn, rook_open_file, rook_seventh,
+king_safety, piece_development, connected_rooks, bishop_pair, isolated_pawn
+Wrong sign (3/12): doubled_pawn (−0.044), pawn_advancement (−0.103), center_control (−0.001, newly wrong)
+Note: `mobility` at 0.250 is ~3× the next feature — structural concern for feature design
+
+### Stockfish Integration
+- **Stockfish 19** installed via `winget install Stockfish.Stockfish`
+- Auto-detected at: `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Stockfish.Stockfish_*\stockfish\stockfish-windows-x86-64-universal.exe`
+- Accessible via `chess.engine.SimpleEngine.popen_uci(SF_PATH)` in python-chess
+- ELO limiting: `sf.configure({"UCI_LimitStrength": True, "UCI_Elo": 1320})` — minimum is 1320 for Stockfish 19
+- Always pass `ponder=False` to `sf.play()` to prevent UCI communication hangs
+- `stockfish_evals` DB table logs aggregate match results (source = `'benchmark'` or `'live'`)
+- `stockfish_games` DB table logs individual game PGNs (created by `05_stockfish_benchmark.R`)
+- First benchmark result: engine lost to Stockfish 1320 (0W/1L/0D) — estimated ELO < 1320
 
 ---
 
@@ -125,12 +141,18 @@ Persistently wrong sign (depth-2 artifacts): doubled_pawn, pawn_advancement, con
 | `scripts/r/03_visualize.qmd` | Full cross-run visualization |
 | `scripts/r/04_game_viewer.R` | Shiny app — game viewer with run selector |
 | `scripts/r/td_tutorial.qmd` | Tutorial: TD(0) learning via Scholar's Mate walkthrough |
+| `scripts/r/negamax_tutorial.qmd` | Tutorial: negamax search with alpha-beta pruning; worked example using live weights |
+| `scripts/r/05_move_scorer.R` | Parameterized script — score all legal moves from any FEN at configurable depth/run |
+| `scripts/r/05_stockfish_benchmark.R` | Parameterized script — run ELO benchmark vs Stockfish; designed to run as a background job so the console stays free |
+| `scripts/r/05_search_explorer.R` | Shiny app — interactive move scorer; navigate positions, compare move rankings by depth |
+| `scripts/r/06_search_mechanics.R` | Step-by-step walkthrough: board evaluation feature-by-feature, negamax depth-by-depth |
+| `scripts/r/06_stockfish_arena.R` | Shiny app — Live Game (engine vs Stockfish) and ELO Benchmark read-only viewer (polls DB every 30s); run benchmarks via `05_stockfish_benchmark.R` |
+| `scripts/r/07_human_play.R` | Shiny app — Human vs engine with real TD(0) weight updates and post-game learning diagnostics |
 
 ---
 
 ## Planned Tutorials
 1. Self-play Python script walkthrough
-2. Negamax with alpha-beta pruning (use depth=3 for the illustrative game tree)
 
 ---
 
