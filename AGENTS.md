@@ -158,6 +158,39 @@ Note: `mobility` at 0.250 is ~3× the next feature — structural concern for fe
 
 ## Assistant Interaction Conventions
 
+### Session-end procedure
+
+Triggered by phrases like "let's end the session", "I'm going to bed", "I need to restart", "wrapping up", etc.
+Execute the following steps **in order**, without waiting for individual confirmations:
+
+1. **Close open DB connections** — run `dbDisconnect()` on all open SQLiteConnection objects visible in the R session (`con`, `con2`, `con3`, `con_retro`, `con_bm`, etc.)
+
+2. **Note any running background jobs** — check for active self-play training or benchmark jobs; record their current status in the session log
+
+3. **Update `ChessLearningLog.md`** — append the session entry:
+   - Key findings and analytical results
+   - New scripts or apps built
+   - Bugs found and fixed
+   - Overnight jobs scheduled
+   - Steps for next session
+
+4. **Update `AGENTS.md`** — refresh any stale sections:
+   - Current Architecture header (session number)
+   - Key Run History table
+   - Current Weight State
+   - DB schema (table count)
+   - R Analysis Scripts table (new files)
+
+5. **Update `GitLog.md`** — append an entry if any git operations were performed this session (commands, outcomes, issues resolved)
+
+6. **Git commit and push**:
+   ```bash
+   git add -A
+   git commit -m "<concise summary of session work>"
+   git push
+   ```
+   If push fails due to file size, follow the filter-branch procedure documented in `GitLog.md`.
+
 ### Code edits
 - Do not make any edits without explicit instruction from the user
 - Once instructed, make all changes without asking for mid-sequence confirmation
