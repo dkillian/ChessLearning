@@ -9,6 +9,10 @@ Components:
 All features are computed from the perspective of the side to move
 (positive = good for side to move). This lets the negamax search
 simply negate scores at each ply.
+
+Feature count: 14 learnable positional features (material is hard-coded).
+Phase-scaled features: mobility (midgame), king_safety (midgame),
+                       pawn_advancement (endgame).
 """
 
 import chess
@@ -22,20 +26,22 @@ from typing import Optional
 FEATURE_NAMES = [
     # Pawn structure
     "passed_pawn",
-    "doubled_pawn",     # penalty: positive weight = bad doubled pawns hurt
-    "isolated_pawn",    # same convention
+    "doubled_pawn",     # penalty — negated so positive weight = good
+    "isolated_pawn",    # penalty — same convention
+    "backward_pawn",    # penalty — same convention
     # King safety
-    "king_safety",      # safe squares adjacent to king
+    "king_safety",      # safe squares adjacent to king; phase-scaled (midgame)
     # Activity
-    "center_control",
+    "center_control",   # attacks + occupation of d4/d5/e4/e5
     "rook_open_file",
     "connected_rooks",
     # Piece coordination & development
+    "knight_pst",       # piece-square table score for knights
     "bishop_pair",
     "rook_seventh",
     "piece_development",
-    "mobility",
-    "pawn_advancement",
+    "mobility",         # squares attacked by non-king pieces; phase-scaled (midgame)
+    "pawn_advancement", # most advanced pawn rank; phase-scaled (endgame)
 ]
 
 # Piece values hard-coded as prior knowledge — not learned.
@@ -47,6 +53,20 @@ PIECE_VALUES = {
     chess.ROOK:   0.5,
     chess.QUEEN:  0.9,
 }
+
+# Knight piece-square table (White's perspective; rank 0 = White's back rank).
+# Values in pawn fractions: rim squares ≈ −0.50, central outposts ≈ +0.20.
+# Mirrored vertically for Black.
+_KNIGHT_PST = [
+    -0.50, -0.40, -0.30, -0.30, -0.30, -0.30, -0.40, -0.50,  # rank 0
+    -0.40, -0.20,  0.00,  0.00,  0.00,  0.00, -0.20, -0.40,  # rank 1
+    -0.30,  0.00,  0.10,  0.15,  0.15,  0.10,  0.00, -0.30,  # rank 2
+    -0.30,  0.05,  0.15,  0.20,  0.20,  0.15,  0.05, -0.30,  # rank 3
+    -0.30,  0.00,  0.15,  0.20,  0.20,  0.15,  0.00, -0.30,  # rank 4
+    -0.30,  0.05,  0.10,  0.15,  0.15,  0.10,  0.05, -0.30,  # rank 5
+    -0.40, -0.20,  0.00,  0.05,  0.05,  0.00, -0.20, -0.40,  # rank 6
+    -0.50, -0.40, -0.30, -0.30, -0.30, -0.30, -0.40, -0.50,  # rank 7
+]
 
 
 def default_weights(init: str = "zero") -> dict:
@@ -116,6 +136,48 @@ def _count_isolated_pawns(board: chess.Board, color: chess.Color) -> int:
     return count
 
 
+def _count_backward_pawns(board: chess.Board, color: chess.Color) -> int:
+    """
+    Pawns that cannot advance safely and have no friendly pawn support.
+    A pawn is backward if:
+      1. The square immediately in front is attacked by an opponent pawn.
+      2. No friendly pawn on an adjacent file is at the same rank or behind.
+    """
+    our_pawns = board.pieces(chess.PAWN, color)
+    opp = not color
+    pawn_positions = [
+        (chess.square_file(sq), chess.square_rank(sq)) for sq in our_pawns
+    ]
+    count = 0
+    for sq in our_pawns:
+        file = chess.square_file(sq)
+        rank = chess.square_rank(sq)
+        front_rank = rank + 1 if color == chess.WHITE else rank - 1
+        if not (0 <= front_rank <= 7):
+            continue
+        front_sq = chess.square(file, front_rank)
+        if not board.is_attacked_by(opp, front_sq):
+            continue  # square ahead is safe — not backward
+        supported = False
+        for adj_file in (file - 1, file + 1):
+            if not (0 <= adj_file <= 7):
+                continue
+            for f, r in pawn_positions:
+                if f != adj_file:
+                    continue
+                if color == chess.WHITE and r <= rank:
+                    supported = True
+                    break
+                if color == chess.BLACK and r >= rank:
+                    supported = True
+                    break
+            if supported:
+                break
+        if not supported:
+            count += 1
+    return count
+
+
 def _king_safety_score(board: chess.Board, color: chess.Color) -> int:
     """Number of squares adjacent to king NOT attacked by the opponent."""
     king_sq = board.king(color)
@@ -129,9 +191,19 @@ def _king_safety_score(board: chess.Board, color: chess.Color) -> int:
 
 
 def _center_control_score(board: chess.Board, color: chess.Color) -> int:
-    """Number of central squares (d4, d5, e4, e5) attacked by color."""
+    """
+    Attacks on d4/d5/e4/e5 by any piece, plus occupation of those squares
+    by friendly pawns. Max = 8 (4 attacks + 4 pawn occupations).
+    """
     center = (chess.D4, chess.D5, chess.E4, chess.E5)
-    return sum(1 for sq in center if board.is_attacked_by(color, sq))
+    attacks = sum(1 for sq in center if board.is_attacked_by(color, sq))
+    occupation = sum(
+        1 for sq in center
+        if (p := board.piece_at(sq)) is not None
+        and p.piece_type == chess.PAWN
+        and p.color == color
+    )
+    return attacks + occupation
 
 
 def _count_rooks_open_file(board: chess.Board, color: chess.Color) -> int:
@@ -166,6 +238,21 @@ def _are_rooks_connected(board: chess.Board, color: chess.Color) -> bool:
     return False
 
 
+def _knight_pst_score(board: chess.Board, color: chess.Color) -> float:
+    """
+    Piece-square table score summed over all knights of the given color.
+    Uses _KNIGHT_PST indexed from rank 0 (White's back rank); mirrored
+    vertically for Black so both sides use the same positional incentives.
+    """
+    total = 0.0
+    for sq in board.pieces(chess.KNIGHT, color):
+        rank = chess.square_rank(sq)
+        file = chess.square_file(sq)
+        idx = (rank * 8 + file) if color == chess.WHITE else ((7 - rank) * 8 + file)
+        total += _KNIGHT_PST[idx]
+    return total
+
+
 _WHITE_MINOR_STARTS = frozenset({chess.B1, chess.G1, chess.C1, chess.F1})
 _BLACK_MINOR_STARTS = frozenset({chess.B8, chess.G8, chess.C8, chess.F8})
 
@@ -180,7 +267,10 @@ def _piece_development(board: chess.Board, color: chess.Color) -> int:
 def _count_rooks_seventh(board: chess.Board, color: chess.Color) -> int:
     """Rooks on the 7th rank (rank index 6 for white, rank index 1 for black)."""
     target_rank = 6 if color == chess.WHITE else 1
-    return sum(1 for sq in board.pieces(chess.ROOK, color) if chess.square_rank(sq) == target_rank)
+    return sum(
+        1 for sq in board.pieces(chess.ROOK, color)
+        if chess.square_rank(sq) == target_rank
+    )
 
 
 def _mobility(board: chess.Board, color: chess.Color) -> int:
@@ -193,12 +283,37 @@ def _mobility(board: chess.Board, color: chess.Color) -> int:
 
 
 def _pawn_advancement(board: chess.Board, color: chess.Color) -> int:
-    """Total rank advancement of all pawns from their starting rank."""
-    total = 0
-    for sq in board.pieces(chess.PAWN, color):
-        rank = chess.square_rank(sq)
-        total += (rank - 1) if color == chess.WHITE else (6 - rank)
-    return total
+    """
+    Rank advancement of the single most advanced pawn from its starting rank.
+    White starting rank = 1; Black starting rank = 6.
+    Returns 0 if no pawns remain. Max = 5 (one step before promotion square).
+    """
+    pawns = board.pieces(chess.PAWN, color)
+    if not pawns:
+        return 0
+    if color == chess.WHITE:
+        return max(chess.square_rank(sq) - 1 for sq in pawns)
+    else:
+        return max(6 - chess.square_rank(sq) for sq in pawns)
+
+
+def _game_phase(board: chess.Board) -> float:
+    """
+    Midgame fraction ∈ [0.0, 1.0].
+    1.0 = full midgame (all pieces on board); 0.0 = pure endgame.
+    Weighted piece count: Q=4, R=2, N=1, B=1. Full midgame baseline = 24.
+    """
+    n = (
+        (len(board.pieces(chess.QUEEN,  chess.WHITE)) +
+         len(board.pieces(chess.QUEEN,  chess.BLACK))) * 4 +
+        (len(board.pieces(chess.ROOK,   chess.WHITE)) +
+         len(board.pieces(chess.ROOK,   chess.BLACK))) * 2 +
+        (len(board.pieces(chess.KNIGHT, chess.WHITE)) +
+         len(board.pieces(chess.KNIGHT, chess.BLACK))) +
+        (len(board.pieces(chess.BISHOP, chess.WHITE)) +
+         len(board.pieces(chess.BISHOP, chess.BLACK)))
+    )
+    return min(n / 24.0, 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -210,33 +325,50 @@ def extract_features(board: chess.Board) -> dict:
     Return a dict mapping feature name -> value, from the perspective
     of the side to move. Positive values are favorable for the side to move.
 
-    Penalty features (doubled_pawn, isolated_pawn) are negated so that
-    a positive weight always means 'this is good for the side to move.'
+    Conventions:
+      - Penalty features (doubled_pawn, isolated_pawn, backward_pawn) are
+        negated so a positive weight always means 'this is good for side to move'.
+      - center_control normalized by /4 (raw max = 8 per side).
+      - knight_pst normalized by /2 (raw max ≈ 0.4 per side with two knights).
+      - mobility normalized by /30 (raw max ≈ 30 per side).
+      - pawn_advancement normalized by /5 (raw max = 5 per side).
+
+    Phase scaling:
+      - king_safety   × phase          (diminishes as pieces leave the board)
+      - mobility      × (0.5 + 0.5×phase) (midgame-weighted; ≥50% always)
+      - pawn_advancement × (0.5 + 0.5×end) (endgame-weighted; ≥50% always)
     """
-    us = board.turn
-    them = not us
+    us    = board.turn
+    them  = not us
+    phase = _game_phase(board)
+    end   = 1.0 - phase
 
     features = {
-        # Pawn structure (passed = good; doubled/isolated = bad, so negate)
-        "passed_pawn":   _count_passed_pawns(board, us)   - _count_passed_pawns(board, them),
-        "doubled_pawn":  -(_count_doubled_pawns(board, us) - _count_doubled_pawns(board, them)),
-        "isolated_pawn": -(_count_isolated_pawns(board, us)- _count_isolated_pawns(board, them)),
+        # Pawn structure
+        "passed_pawn":    _count_passed_pawns(board, us)    - _count_passed_pawns(board, them),
+        "doubled_pawn":  -(_count_doubled_pawns(board, us)  - _count_doubled_pawns(board, them)),
+        "isolated_pawn": -(_count_isolated_pawns(board, us) - _count_isolated_pawns(board, them)),
+        "backward_pawn": -(_count_backward_pawns(board, us) - _count_backward_pawns(board, them)),
 
-        # King safety and activity
-        "king_safety":    _king_safety_score(board, us)    - _king_safety_score(board, them),
-        "center_control": _center_control_score(board, us) - _center_control_score(board, them),
-        "rook_open_file": _count_rooks_open_file(board, us)- _count_rooks_open_file(board, them),
-        "connected_rooks":   int(_are_rooks_connected(board, us)) - int(_are_rooks_connected(board, them)),
+        # King safety — phase-scaled: attacking pieces must be present to matter
+        "king_safety":    (_king_safety_score(board, us) - _king_safety_score(board, them)) * phase,
+
+        # Activity
+        "center_control": (_center_control_score(board, us) - _center_control_score(board, them)) / 4.0,
+        "rook_open_file": _count_rooks_open_file(board, us) - _count_rooks_open_file(board, them),
+        "connected_rooks": int(_are_rooks_connected(board, us)) - int(_are_rooks_connected(board, them)),
 
         # Piece coordination & development
-        "bishop_pair":       int(len(board.pieces(chess.BISHOP, us)) >= 2) - int(len(board.pieces(chess.BISHOP, them)) >= 2),
-        "rook_seventh":      _count_rooks_seventh(board, us)  - _count_rooks_seventh(board, them),
-        "piece_development": _piece_development(board, us)    - _piece_development(board, them),
-        # Normalized: raw differences can reach ±30 and ±40 respectively, which creates
-        # prediction errors far outside the [-1, +1] TD target range and causes weight explosion.
-        # Dividing brings typical values to ±1, matching the scale of material features.
-        "mobility":         (_mobility(board, us)          - _mobility(board, them))         / 30.0,
-        "pawn_advancement": (_pawn_advancement(board, us)  - _pawn_advancement(board, them)) / 10.0,
+        "knight_pst":     (_knight_pst_score(board, us)  - _knight_pst_score(board, them))  / 2.0,
+        "bishop_pair":    int(len(board.pieces(chess.BISHOP, us)) >= 2) - int(len(board.pieces(chess.BISHOP, them)) >= 2),
+        "rook_seventh":   _count_rooks_seventh(board, us)   - _count_rooks_seventh(board, them),
+        "piece_development": _piece_development(board, us)  - _piece_development(board, them),
+
+        # Mobility — midgame-weighted: piece activity matters more with more pieces
+        "mobility":       (_mobility(board, us) - _mobility(board, them)) / 30.0 * (0.5 + 0.5 * phase),
+
+        # Pawn advancement — most advanced pawn; endgame-weighted
+        "pawn_advancement": (_pawn_advancement(board, us) - _pawn_advancement(board, them)) / 5.0 * (0.5 + 0.5 * end),
     }
 
     return features
@@ -268,7 +400,7 @@ def evaluate(board: chess.Board, weights: dict) -> float:
         for pt, value in PIECE_VALUES.items()
     )
 
-    features = extract_features(board)
+    features   = extract_features(board)
     positional = sum(weights.get(name, 0.0) * val for name, val in features.items())
 
     return material + positional
@@ -306,7 +438,7 @@ def negamax(
         if score > alpha:
             alpha = score
         if alpha >= beta:
-            break  # Beta cutoff
+            break  # beta cutoff
 
     return max_score
 
@@ -319,7 +451,7 @@ def get_best_move(
 ) -> tuple[Optional[chess.Move], float]:
     """
     Return (best_move, score) for the current side to move.
-    
+
     randomize=True shuffles the move list before searching, so that
     ties are broken randomly rather than by move order. This prevents
     the engine from repeating the same games when weights are near zero.
@@ -330,10 +462,10 @@ def get_best_move(
     if randomize:
         random.shuffle(moves)
 
-    best_move = None
+    best_move  = None
     best_score = float("-inf")
-    alpha = float("-inf")
-    beta = float("inf")
+    alpha      = float("-inf")
+    beta       = float("inf")
 
     for move in moves:
         board.push(move)
@@ -342,7 +474,7 @@ def get_best_move(
 
         if score > best_score:
             best_score = score
-            best_move = move
+            best_move  = move
         if score > alpha:
             alpha = score
 

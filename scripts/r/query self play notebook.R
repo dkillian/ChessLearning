@@ -29,7 +29,7 @@ games <- tbl(con, "games") |>
 
 # Parameters ----
 
-RUN_ID     <- 12
+RUN_ID     <- 13
 GAME_START <- NULL   # set to integer to restrict to a tranche (NULL = all)
 GAME_END   <- NULL
 
@@ -77,10 +77,10 @@ ggplot(wts_trj, aes(x = game_number, y = weight_value)) +
 # which features drive deltas ---- 
 
 tbl(con, "weight_deltas") |>
-    filter(run_id == 11) |>
+    filter(run_id == 13) |>
     collect() |>
     left_join(
-        tbl(con, "games") |> filter(run_id == 11) |>
+        tbl(con, "games") |> filter(run_id == 13) |>
             select(game_number, outcome) |> collect(),
         by = "game_number"
     ) |>

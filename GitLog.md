@@ -119,6 +119,7 @@ Succeeded. Remote is now clean.
 | Hash | Date | Message |
 |---|---|---|
 | `ce5e426` | 2026-10-07 | Session 10: softmax notebook, Stockfish integration, game viewer analysis panel, 6 new R scripts (post-filter-branch SHA) |
+| TBD | 2026-10-07 | Session 11: engine.py 14 features, softmax bug fixes, doc update, run_id=14 config |
 | `b3d9470` | earlier | Initial commit |
 
 *(Intermediate "d" commits were rewritten by filter-branch and their SHAs changed.)*

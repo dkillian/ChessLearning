@@ -3,7 +3,7 @@
 **Activity**: Learning Study
 **Workspace**: Chess Learning
 **Initialized**: September 29, 2026
-**Status**: Stages 01–03 complete. Ready for full training run.
+**Status**: Active — depth=3 training running (run_id=12 complete at 1200 games; run_id=13 planned)
 
 ---
 
@@ -25,12 +25,14 @@ during self-play training, and is that sequence reproducible across independent 
 3. Across 30 independent 10-hour training runs, how consistent is the sequence of concept acquisition?
 4. Is there variance in *when* a concept emerges, even if the *order* is stable?
 5. Does the sequence of learning parallel how human chess players typically develop?
-6. **Pawn U-curve hypothesis**: Does `material_pawn` weight dip negative during the phase
+6. **Pawn U-curve hypothesis**: Does the pawn weight dip negative during the phase
    when major-piece weights (queen, rook) are rising sharply, before recovering?
    If this pattern is reproducible across the 30 runs in timing and direction, it suggests
    a structural artifact of the game rather than noise: the engine temporarily learns that
    "having more pawns while the opponent has an extra queen" predicts losing.
    Low cross-run variance in the dip = structural; high variance = noise.
+   (Note: with material now hard-coded, this hypothesis applies if material features are
+   reintroduced in a future experimental series.)
 
 ---
 
@@ -54,26 +56,43 @@ Concepts with high cross-run variance are contextually acquired.
 
 ### Engine Architecture
 
-A **linear evaluation function** with explicit chess concept features.
+A **linear evaluation function** with hard-coded material and 12 learnable positional features.
 
 ```
 board position
       ↓
-Feature Extractor  →  named feature vector
+Feature Extractor  →  named positional feature vector (12 features)
       ↓
-Weighted dot product  →  position score
+Evaluator: hard-coded material score + weighted dot product (positional)  →  position score
       ↓
-Minimax Search (alpha-beta pruning)  →  move selection
+Negamax Search (alpha-beta pruning, depth=3)  →  move selection
 ```
 
-The feature weights *are* the knowledge. Their trajectory over training is the primary data.
+The positional feature weights *are* the knowledge. Their trajectory over training is the primary data.
+Material evaluation is hard-coded via `PIECE_VALUES` (queen=0.9, rook=0.5, bishop=0.3,
+knight=0.3, pawn=0.1, scaled to TD target range) and is not part of the learnable weight vector.
 
 ### Learning Algorithm
 
-**Temporal Difference (TD) learning** — after each game, weights are adjusted based on
-prediction error: did the evaluator correctly anticipate who would win?
+**Temporal Difference (TD(0)) learning** — after each move, the weight vector is updated
+using one-step bootstrapping:
+
+- Non-terminal target: `-V(s_{t+1})` (negated successor evaluation)
+- Terminal target: actual game outcome (+1 win, 0 draw, −1 loss)
 
 This is the same learning principle used in Tesauro's TD-Gammon (1992), applied to chess.
+TD(0) structurally suppresses draw erosion: the draw signal (target=0) only propagates
+one step at a time and does not flatten earlier weights.
+
+A per-feature draw learning rate scale (`draw_lr_scales`) is applied to features with
+unusually high draw-gradient magnitude. Currently: `king_safety` gets 5% of normal LR
+during draws.
+
+### Move Selection
+
+**Epsilon-greedy** (ε=0.1): with probability 0.1, a random legal move is chosen;
+otherwise, the engine plays the negamax-best move. An alternative variant (`selfplay_softmax.ipynb`)
+uses softmax sampling over the top-N candidates with temperature τ=0.05.
 
 ### Self-Play Loop
 
@@ -82,9 +101,9 @@ to the database. The cycle repeats continuously for the duration of a training r
 
 ### Experimental Design
 
-- Training run duration: 10 hours
-- Number of independent runs: 30
-- Each run starts from random or near-zero weights
+- Search depth: 3
+- Number of independent runs: 30 (planned)
+- Each run starts from zero positional weights
 - Concept "emergence" is defined as: weight exceeds a meaningful threshold
   (to be calibrated during early runs)
 
@@ -92,27 +111,50 @@ to the database. The cycle repeats continuously for the duration of a training r
 
 ## Chess Concept Features
 
+Material evaluation is **hard-coded** in the evaluator and not part of the learnable weight vector.
+The 12 learnable features are all positional:
+
 | Feature Name | Description | Concept Tracked |
 |---|---|---|
-| `material_queen` | Count of queens on board | Piece value learning |
-| `material_rook` | Count of rooks | Piece value learning |
-| `material_bishop` | Count of bishops | Piece value learning |
-| `material_knight` | Count of knights | Piece value learning |
-| `material_pawn` | Count of pawns | Piece value learning |
 | `passed_pawn` | Pawns with no opposing pawns on same/adjacent files | Endgame pawn play |
 | `doubled_pawn` | Pawns on same file (penalty) | Pawn structure weakness |
 | `isolated_pawn` | Pawns with no friendly pawns on adjacent files (penalty) | Pawn structure weakness |
+| `pawn_advancement` | Total rank advancement of all pawns from starting rank | Pawn push tendency |
 | `king_safety` | Count of attackers near king | King protection |
-| `center_control` | Control of e4/d4/e5/d5 | Opening principles |
+| `center_control` | Attacks on e4/d4/e5/d5 | Opening principles |
 | `rook_open_file` | Rooks on files with no pawns | Rook activity |
-| `connected_rooks` | Whether both rooks are on same rank/file | Piece coordination |
+| `connected_rooks` | Whether both rooks share a rank or file | Piece coordination |
 | `bishop_pair` | Having both bishops vs. opponent | Static piece advantage |
 | `rook_seventh` | Rooks on the 7th rank (2nd for black) | Rook infiltration |
 | `piece_development` | Minor pieces off their starting squares | Opening principles |
 | `mobility` | Squares attacked by all non-king pieces | Overall piece activity |
-| `pawn_advancement` | Total rank advancement of all pawns from starting rank | Pawn push tendency |
 
 Features are computed from the perspective of the side to move (positive = good for side to move).
+
+**Feature normalization**: `mobility` is divided by 30 and `pawn_advancement` by 10 to bring
+raw values into the ±1 range consistent with TD target scale.
+
+---
+
+## Current Weight State (run_id=12, game 1200)
+
+| Feature | Weight | Status |
+|---|---|---|
+| `mobility` | +0.250 | ✓ — dominating evaluation (~3× next feature; structural concern) |
+| `passed_pawn` | +0.083 | ✓ |
+| `rook_open_file` | +0.066 | ✓ |
+| `bishop_pair` | +0.024 | ✓ |
+| `isolated_pawn` | +0.019 | ✓ |
+| `rook_seventh` | ~+0.046 | ✓ |
+| `king_safety` | ~+0.038 | ✓ |
+| `piece_development` | ~+0.021 | ✓ |
+| `connected_rooks` | ~+0.012 | ✓ |
+| `center_control` | −0.001 | ✗ (crossed zero at game 1200) |
+| `doubled_pawn` | −0.044 | ✗ (persists wrong sign) |
+| `pawn_advancement` | −0.103 | ✗ (worsening fast) |
+
+Correct signs: 9/12. `doubled_pawn` and `pawn_advancement` have been persistently wrong-signed
+across all depth=3 games; root cause under investigation.
 
 ---
 
@@ -123,106 +165,215 @@ Features are computed from the perspective of the side to move (positive = good 
 | Component | Language | Description |
 |---|---|---|
 | Rules engine | Python (`python-chess`) | Legal move generation, game state |
-| Feature extractor | Python | Board → named feature vector |
-| Evaluator | Python | Feature vector → position score |
-| Search | Python | Minimax with alpha-beta pruning |
+| Feature extractor | Python | Board → 12-element named positional feature vector |
+| Evaluator | Python | Hard-coded material + weighted dot product over positional features |
+| Search | Python | Negamax with alpha-beta pruning (depth=3) |
 | Self-play loop | Python | Plays games, logs outcomes |
-| TD learner | Python | Updates weights after each game |
+| TD learner | Python | TD(0) weight updates after each half-move |
 | Database logger | Python (`sqlite3`) | Writes games and weights to SQLite |
-| Visualization | R (`tidyverse`, `DBI`, `RSQLite`) | Weight trajectories, concept emergence |
+| Visualization | R (`tidyverse`, `DBI`, `RSQLite`) | Weight trajectories, concept emergence, benchmarking |
+| Stockfish interface | Python (`python-chess`) | ELO benchmarking and live play |
 
 ### Data Flow
 
 ```
 Self-play game  →  game outcome + positions
-                →  SQLite: games table
-TD weight update  →  new weights
-                →  SQLite: weights table (checkpointed every N games)
+                →  SQLite: games, game_records, feature_stats, position_logs
+TD weight update  →  new weights + deltas
+                →  SQLite: weights, weight_deltas (checkpointed every 10 games)
+Stockfish match  →  game outcome + PGN
+                →  SQLite: stockfish_evals, stockfish_games
 R reads SQLite  →  weight trajectory plots
                 →  concept emergence charts
-                →  cross-run comparison
+                →  ELO benchmark viewer
 ```
 
 ### Database Schema
 
-**`runs`** table:
+10 tables in `data/chess_learning.db`. The `stockfish_games` table is created by
+`05_stockfish_benchmark.R`, not by `setup_database()` in the training notebook.
+
+**`runs`** — one row per training run
 | Column | Type | Description |
 |---|---|---|
 | run_id | INTEGER | Primary key |
 | started_at | TEXT | Timestamp |
 | hyperparameters | TEXT | JSON: learning rate, search depth, etc. |
 
-**`games`** table:
+**`games`** — one row per game
 | Column | Type | Description |
 |---|---|---|
 | game_id | INTEGER | Primary key |
-| run_id | INTEGER | Foreign key |
+| run_id | INTEGER | Foreign key → runs |
 | game_number | INTEGER | Sequential within run |
 | outcome | TEXT | 'white', 'black', 'draw' |
-| length | INTEGER | Number of moves |
+| length | INTEGER | Number of half-moves |
 | final_material | REAL | Material balance at game end |
 | played_at | TEXT | Timestamp |
 
-**`weights`** table:
+**`game_records`** — move-by-move PGN records for self-play games
+| Column | Type | Description |
+|---|---|---|
+| record_id | INTEGER | Primary key |
+| game_id | INTEGER | Foreign key → games |
+| pgn | TEXT | Full PGN text of the game |
+
+**`weights`** — checkpointed weight values
 | Column | Type | Description |
 |---|---|---|
 | weight_id | INTEGER | Primary key |
-| run_id | INTEGER | Foreign key |
+| run_id | INTEGER | Foreign key → runs |
 | checkpoint | INTEGER | Game number at checkpoint |
 | feature_name | TEXT | Name of the feature |
 | weight_value | REAL | Weight value at checkpoint |
+
+**`weight_deltas`** — per-checkpoint weight change magnitudes
+| Column | Type | Description |
+|---|---|---|
+| delta_id | INTEGER | Primary key |
+| run_id | INTEGER | Foreign key → runs |
+| checkpoint | INTEGER | Game number |
+| feature_name | TEXT | Name of the feature |
+| delta | REAL | Change in weight since last checkpoint |
+
+**`feature_stats`** — per-game mean feature values (from white's perspective)
+| Column | Type | Description |
+|---|---|---|
+| stat_id | INTEGER | Primary key |
+| game_id | INTEGER | Foreign key → games |
+| feature_name | TEXT | Name of the feature |
+| mean_value | REAL | Mean feature value across positions (white-perspective) |
+
+**`position_logs`** — position-level evaluation records
+| Column | Type | Description |
+|---|---|---|
+| log_id | INTEGER | Primary key |
+| game_id | INTEGER | Foreign key → games |
+| ply | INTEGER | Half-move number |
+| evaluation | REAL | Position score at this ply |
+| td_error | REAL | TD prediction error |
+
+**`baseline_evals`** — random mover baseline match results (disabled; `BASELINE_EVERY=None`)
+| Column | Type | Description |
+|---|---|---|
+| eval_id | INTEGER | Primary key |
+| run_id | INTEGER | Foreign key → runs |
+| checkpoint | INTEGER | Game number at evaluation |
+| wins | INTEGER | Engine wins vs random mover |
+| losses | INTEGER | Engine losses vs random mover |
+| draws | INTEGER | Draws vs random mover |
+
+**`stockfish_evals`** — aggregate Stockfish benchmark results
+| Column | Type | Description |
+|---|---|---|
+| eval_id | INTEGER | Primary key |
+| run_id | INTEGER | Foreign key → runs |
+| checkpoint | INTEGER | Weight checkpoint evaluated |
+| sf_elo | INTEGER | Stockfish UCI_Elo setting |
+| wins | INTEGER | Engine wins |
+| losses | INTEGER | Engine losses |
+| draws | INTEGER | Draws |
+| source | TEXT | 'benchmark' or 'live' |
+| played_at | TEXT | Timestamp |
+
+**`stockfish_games`** — individual game PGNs from Stockfish matches
+| Column | Type | Description |
+|---|---|---|
+| sg_id | INTEGER | Primary key |
+| eval_id | INTEGER | Foreign key → stockfish_evals |
+| game_number | INTEGER | Sequential within eval batch |
+| pgn | TEXT | Full PGN text |
+| outcome | TEXT | 'white', 'black', 'draw' |
 
 ---
 
 ## Pipeline Description
 
 ### Stage 01 — Engine (Python)
-Build and test the core engine components:
-- `01_engine.py`: feature extractor, evaluator, minimax search
-- Unit tests to verify legal move generation and feature computation
 
-### Stage 02 — Self-Play (Python)
-- `02_selfplay.py`: self-play loop, TD learning, SQLite logging
-- Configurable: run duration, checkpoint frequency, learning rate, search depth
+Core engine: feature extractor, linear evaluator, negamax search with alpha-beta pruning.
 
-### Stage 03 — Visualization (R)
-- `03_visualize.R`: weight trajectory plots, concept emergence timing
-- `03_compare_runs.R`: cross-run analysis, variance in emergence sequence
+- `engine.py`: importable module used by all training scripts
+- `engine.ipynb`: documented notebook version with 6 verification checks
+
+### Stage 02 — Self-Play / Training (Python)
+
+Three variants of the self-play training loop:
+
+- `selfplay_td0.ipynb`: current primary training script — TD(0) bootstrapping, epsilon-greedy, hard-coded material
+- `selfplay_softmax.ipynb`: variant — softmax move selection with temperature τ=0.05, style modifier presets
+- `selfplay_mc.ipynb`: archived — original Monte Carlo return implementation (superseded)
+
+### Stage 03 — Analysis & Reporting (R)
+
+Visualization and analysis scripts — see File Descriptions below.
 
 ---
 
 ## Folder Structure
 
 ```
-Chess Learning/                        ← Repo root
-├── AGENTS.md
+Chess Learning/                          ← Repo root
+├── AGENTS.md                            ← Project memory for Posit Assistant
 ├── ActivitySetupGuide.md
 ├── README.md
-├── ChessLearningDocumentation.md      ← This file
-├── ChessLearningLog.md                ← Session log
-├── ChessLearningConversations.md      ← Conversation transcript
+├── ChessLearningDocumentation.md        ← This file
+├── ChessLearningLog.md                  ← Session log
+├── ChessLearningConversations.md        ← Conversation transcript
 ├── scripts/
 │   ├── python/
-│   │   ├── engine.py                  ← Importable module (feature extractor, evaluator, search)
-│   │   └── engine.ipynb               ← Stage 01: documented notebook with verification
-│   │   └── selfplay.ipynb             ← Stage 02: self-play loop, TD learning, SQLite logging
+│   │   ├── engine.py                    ← Importable module (feature extractor, evaluator, search)
+│   │   ├── engine.ipynb                 ← Stage 01: documented notebook with verification
+│   │   ├── selfplay_td0.ipynb           ← Stage 02: current training script (TD(0))
+│   │   ├── selfplay_softmax.ipynb       ← Stage 02 variant: softmax + style modifiers
+│   │   └── selfplay_mc.ipynb            ← Stage 02 archive: Monte Carlo version
 │   └── r/
-│       └── 03_visualize.qmd           ← Stage 03: Quarto visualization document
+│       ├── query self play notebook.R   ← Parameterized assessment tool (set RUN_ID, GAME_START, GAME_END)
+│       ├── 03_visualize.qmd             ← Full cross-run Quarto visualization
+│       ├── 04_game_viewer.R             ← Shiny: game viewer with source toggle and move analysis
+│       ├── td_tutorial.qmd              ← Tutorial: TD(0) learning via Scholar's Mate
+│       ├── negamax_tutorial.qmd         ← Tutorial: negamax with alpha-beta; worked example
+│       ├── 05_move_scorer.R             ← Parameterized: score all legal moves from any FEN
+│       ├── 05_search_explorer.R         ← Shiny: interactive move scorer with board navigation
+│       ├── 05_stockfish_benchmark.R     ← Parameterized: ELO benchmark (run as background job)
+│       ├── 06_search_mechanics.R        ← Step-by-step: board eval + negamax depth-by-depth walkthrough
+│       ├── 06_stockfish_arena.R         ← Shiny: Live Game viewer + ELO benchmark read-only viewer
+│       └── 07_human_play.R              ← Shiny: human vs engine with live TD(0) updates
 ├── data/
-│   └── chess_learning.db              ← SQLite database (run_id=1: 200-game verification)
-├── viz/                               ← Output plots (populated by 03_visualize.qmd)
-└── models/                            ← Saved weight checkpoints (future use)
+│   └── chess_learning.db                ← SQLite database (10 tables)
+├── viz/                                 ← Output plots
+└── models/                              ← Saved weight checkpoints (future use)
 ```
+
+---
 
 ## File Descriptions
 
+### Python Scripts
+
 | File | Description |
 |---|---|
-| `scripts/python/engine.py` | Importable Python module: 12-feature extractor, linear evaluator, negamax search with alpha-beta. Used by selfplay.ipynb. |
-| `scripts/python/engine.ipynb` | Stage 01 notebook: same content as engine.py with markdown explanations and 6 verification checks. Works in Positron and Colab. |
-| `scripts/python/selfplay.ipynb` | Stage 02 notebook: `play_game`, `td_update`, `train` functions; SQLite logging of runs/games/weights/feature_stats. |
-| `scripts/r/03_visualize.qmd` | Stage 03 Quarto document: weight trajectories, normalised material weights, game stats, feature-outcome rolling correlation, concept emergence timeline. |
-| `data/chess_learning.db` | SQLite database. Tables: `runs`, `games`, `weights`, `feature_stats`. |
+| `scripts/python/engine.py` | Importable module: 12-feature positional extractor, linear evaluator with hard-coded material, negamax search with alpha-beta. Used by all training notebooks. |
+| `scripts/python/engine.ipynb` | Stage 01 notebook: same content as `engine.py` with markdown explanations and 6 verification checks. Compatible with Positron and Colab. |
+| `scripts/python/selfplay_td0.ipynb` | Primary training script: `play_game`, `td_update` (TD(0)), `train`; epsilon-greedy move selection; SQLite logging of all tables. Configure via `RUN_ID`, `DEPTH`, `RESUME`, `N_GAMES`. |
+| `scripts/python/selfplay_softmax.ipynb` | Variant training script: softmax move selection (τ=0.05, top-10 candidates), style modifier presets (neutral/attacking/cautious/reckless/positional). RUN_ID=13+. |
+| `scripts/python/selfplay_mc.ipynb` | Archived Monte Carlo version of the self-play loop. Superseded by TD(0). Retained for reference. |
+
+### R Scripts
+
+| File | Description |
+|---|---|
+| `scripts/r/query self play notebook.R` | Parameterized assessment tool — set `RUN_ID`, `GAME_START`, `GAME_END` to inspect any run slice: decisive rate, weight table, weight trajectory chart, top deltas. |
+| `scripts/r/03_visualize.qmd` | Quarto document: weight trajectories by feature group, game statistics, feature-outcome rolling correlation, concept emergence timeline, final weights table. |
+| `scripts/r/04_game_viewer.R` | Shiny app: step through self-play or Stockfish games move by move; "Why this move?" panel with move scoring bar chart and feature breakdown table; search tree visualization (Graphviz). |
+| `scripts/r/td_tutorial.qmd` | Quarto tutorial: TD(0) learning explained via Scholar's Mate worked example. |
+| `scripts/r/negamax_tutorial.qmd` | Quarto tutorial: negamax with alpha-beta pruning; game tree diagrams (Mermaid); worked example using live run_id=12 weights. |
+| `scripts/r/05_move_scorer.R` | Parameterized script: scores all legal moves from any FEN position at configurable depth and run. |
+| `scripts/r/05_search_explorer.R` | Shiny app: interactive move scorer; navigate positions, enter FENs, compare move rankings by depth. |
+| `scripts/r/05_stockfish_benchmark.R` | Parameterized script: runs ELO benchmark vs Stockfish; designed to run as an RStudio background job. Writes to `stockfish_evals` and `stockfish_games` tables. |
+| `scripts/r/06_search_mechanics.R` | Step-by-step R walkthrough: board evaluation feature-by-feature (feature × weight contribution table), negamax depth-by-depth from depth=0 through depth=3. |
+| `scripts/r/06_stockfish_arena.R` | Shiny app: Live Game tab (engine vs Stockfish, real-time board) and ELO Benchmark tab (read-only viewer polling DB every 30s). Run benchmarks via `05_stockfish_benchmark.R`. |
+| `scripts/r/07_human_play.R` | Shiny app: human vs engine with real TD(0) weight updates; live diagnostics (feature × weight table, evaluation trajectory); post-game analysis (weight delta chart, top-3 learning moments). |
 
 ---
 
@@ -231,27 +382,39 @@ Chess Learning/                        ← Repo root
 | Decision | Rationale |
 |---|---|
 | Linear evaluation over neural network | Weights are directly interpretable; concept tracking is transparent |
-| TD learning over supervised learning | No labeled data needed; learns purely from self-play outcomes |
-| python-chess for rules | Mature, well-tested library; avoids reimplementing complex rules |
+| TD(0) over Monte Carlo returns | Structurally suppresses draw erosion; terminal draw signal only propagates one step at a time |
+| Material hard-coded in evaluator | Removes material erosion problem entirely; isolates positional learning to the weight vector |
+| Per-feature draw LR scale (`draw_lr_scales`) | Allows targeted suppression of draw gradient for features with unusually high draw sensitivity (currently: `king_safety`) |
+| Depth=3 over depth=2 | Corrects depth-2 artifacts in `connected_rooks`; more tactical lookahead; ~60s/game overhead acceptable |
+| Epsilon-greedy (ε=0.1) | Simple, effective exploration; generates decisive games without large overhead |
+| `python-chess` for rules | Mature, well-tested library; avoids reimplementing complex rules |
 | SQLite for storage | Single-file, portable, readable by R via DBI |
 | R for visualization | User preference; excellent for producing publication-quality charts |
+| Stockfish 19 for benchmarking | Provides ELO-limited opponents for strength estimation; minimum UCI_Elo = 1320 |
+| Background job for Stockfish benchmark | Prevents Shiny session blocking; arena app is now read-only |
 
 ---
 
 ## Open Questions
 
-- What threshold defines concept "emergence"? (to be calibrated in early runs)
-- What search depth is feasible within 10-hour run time?
-- Should weights be initialized at zero or with small random values?
-- How frequently to checkpoint weights? (every 10 games? 100 games?)
+- Why do `doubled_pawn` and `pawn_advancement` persistently show wrong signs? Is this a feature design issue, a depth artifact, or a genuine learning difficulty?
+- Why is `mobility` surging to dominate the evaluation (~3× the next feature)? Could be feature scale or a design artifact.
+- `center_control` currently counts only *attacks* on center squares, not occupation — 1.e4 scores for attacking d5, not for occupying e4. Should be redesigned before the 30-run study.
+- Does softmax selection (run_id=13) improve over epsilon-greedy in decisive rate and weight convergence?
+- What ELO does the engine achieve at depth=3, game 1200? First result: 0W/1L/0D vs Stockfish 1320 (ELO < 1320).
+- What threshold defines concept "emergence"? (Emergence = weight magnitude exceeds threshold consistently across checkpoints; calibration in progress.)
+- Is the architecture ready for the 30-run experimental design? Feature design issues (`doubled_pawn`, `pawn_advancement`, `center_control`) suggest iteration before committing.
 
 ---
 
 ## Feature Improvement Candidates
 
-Ideas to consider for a future run. Changing features mid-study would break cross-run
-comparability, so these are deferred until a new experimental series begins.
+Ideas to consider before beginning the 30-run experimental series. Changing features
+mid-study would break cross-run comparability.
 
-| Feature | Issue | Proposed improvement |
+| Feature | Issue | Proposed Improvement |
 |---|---|---|
-| `center_control` | Currently counts only *attacks* on the four center squares (d4, d5, e4, e5). A pawn physically occupying a center square is not credited — 1.e4 scores for attacking d5 diagonally, not for occupying e4. | Add a separate occupation term: `+1` per center square occupied by a friendly pawn. Classical chess theory treats occupation as stronger than attack. |
+| `center_control` | Counts only *attacks* on d4/d5/e4/e5. A pawn occupying a center square is not credited — 1.e4 scores for attacking d5 diagonally, not for occupying e4. | Add occupation term: +1 per center square occupied by a friendly pawn. Classical theory treats occupation as stronger than attack. |
+| `doubled_pawn` | Persistently wrong sign (negative expected, positive learned). Unclear if feature design, scale, or depth artifact. | Investigate which game positions drive wrong-signed updates. Consider sign convention or normalization changes. |
+| `pawn_advancement` | Persistently wrong sign and worsening fast (−0.103 at game 1200). Raw values ÷ 10 may be insufficient normalization. | Investigate update distribution. Consider capping, redesigning as advancement of *advanced* pawns only, or removing. |
+| `mobility` | Surging to 0.250 (3× next feature). May reflect correct chess principle, but magnitude suggests possible scale issue. | Compare raw feature distributions to other features; consider additional normalization. |

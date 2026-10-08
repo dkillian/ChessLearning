@@ -20,7 +20,10 @@ Minor changes within a run (e.g., tranche size, LR adjustment) continue the same
 | 9 | 2026-10-05 | 50 | 2 | 0.001 | 200 | canonical (÷10) | 0.1 | Frozen material weights attempt 2 (same issue — Positron overwrote file edits) |
 | 10 | 2026-10-05 | 50 | 2 | 0.001 | 200 | canonical (÷10) | 0.1 | Frozen material weights confirmed working; zero erosion on all material features |
 | 11 | 2026-10-05 | 850 | 2 | 0.001 | 200 | zero (positional) | 0.1 | **Material hard-coded in evaluator; material removed from weight vector; 78% decisive rate; all positional signs correct** |
-| 12 | 2026-10-05 | — | 3 | 0.001 | 200 | zero (positional) | 0.1 | Depth=3; per-feature draw LR (king_safety=0.05); in progress at session close |
+| 12 | 2026-10-05 | 1200 | 3 | 0.001 | 200 | zero (positional) | 0.1 | Depth=3; per-feature draw LR (king_safety=0.05); 84.2% decisive at game 600, 80.4% at game 1200 |
+| 13 | 2026-10-07 | 212 | 3 | 0.001 | 200 | zero (positional) | softmax τ=0.05 | Softmax selection; 69.4% decisive (regression); 2:1 black-wins asymmetry; pawn_advancement correct sign for first time; center_control took over as top draw-gradient feature |
+| 14 | 2026-10-07 | — | 3 | 0.001 | 200 | zero | 0.1 | **14-feature engine**; epsilon-greedy; draw_lr center_control=0.2 added; overnight run in progress |
+| 15 | 2026-10-07 | — | 3 | 0.001 | 200 | zero | softmax τ=0.05 | Same as 14 but softmax; not yet started |
 
 ---
 
@@ -715,3 +718,73 @@ Built from `selfplay_td0.ipynb` by Python JSON editing. Key changes:
 3. **Compare run_id=13 vs run_id=12**: decisive rate, weight trajectories, ELO — does softmax improve over epsilon-greedy?
 4. **Investigate feature design issues**: why do `doubled_pawn` and `pawn_advancement` persistently show wrong signs? Consider looking at which game positions drive their updates.
 5. **Style variant run**: once neutral baseline is established, try a style variant (e.g., `attacking`) and compare convergence
+
+---
+
+## Session 11 — October 7, 2026
+
+### What We Worked On
+
+- Reviewed and fully updated `ChessLearningDocumentation.md` (had not been updated since Session 1)
+- Diagnosed and fixed four bugs in `selfplay_softmax.ipynb`
+- Assessed run_id=13 (softmax, 212 games)
+- Implemented major architectural improvements to `engine.py` (12 → 14 features)
+- Configured both training scripts for the new architecture
+- Launched run_id=14 (overnight, epsilon-greedy)
+
+### Bugs Fixed in `selfplay_softmax.ipynb`
+
+| Bug | Symptom | Fix |
+|---|---|---|
+| `negamax` not imported | `NameError` on first game | Added to `from engine import ...` |
+| `train()` passing `epsilon=epsilon` to `play_game()` | `TypeError`; softmax params silently ignored | Replaced with `style=`, `temperature=`, `n_candidates=` |
+| `numpy` not installed | `ModuleNotFoundError` | Added to pip install cell |
+| Alpha-beta regression | 192s/game (3.2× slower than run_id=12) | Shared alpha window across root moves in `softmax_move_selection` |
+
+### run_id=13 Assessment (212 games)
+
+- **Decisive rate: 69.4%** — significant regression from run_id=12's 84%
+- **Black wins 2:1 over white** (45.8% vs 23.6%) — origin unclear; could be noise or softmax bias
+- **Weights (10/12 correct signs)**: `pawn_advancement` positive for first time across all runs
+- **Draw-gradient analysis**: `king_safety` fix confirmed working (14× reduction); `center_control` took over as top draw-gradient feature (0.00131)
+- **Speed after fix**: ~30s/game (faster than run_id=12's 60s; alpha-beta sharing effective)
+
+### Engine Architecture Changes (`engine.py`)
+
+Feature count: **12 → 14 learnable positional features**
+
+| Change | Detail |
+|---|---|
+| `center_control` | Added pawn occupation of d4/d5/e4/e5; normalize by /4 |
+| `pawn_advancement` | Redesigned as rank of most advanced pawn only; normalize by /5 |
+| `backward_pawn` (new) | Pawn whose front square is attacked by enemy pawn + no adjacent support; negated penalty |
+| `knight_pst` (new) | PST summed over all knights (rim=−0.50, central=+0.20); normalize by /2 |
+| `_game_phase()` (new) | Midgame fraction [0,1] from weighted piece count / 24 |
+| `king_safety` | Phase-scaled: × phase |
+| `mobility` | Phase-scaled: × (0.5 + 0.5 × phase) |
+| `pawn_advancement` | Endgame-scaled: × (0.5 + 0.5 × (1 − phase)) |
+
+### Training Script Configuration
+
+Both scripts updated for new 14-feature architecture:
+
+| Setting | `selfplay_td0.ipynb` (run_id=14) | `selfplay_softmax.ipynb` (run_id=15) |
+|---|---|---|
+| WEIGHT_INIT | zero | zero |
+| RESUME | False | False |
+| N_GAMES | 400 | 400 |
+| DRAW_LR_SCALES | king_safety: 0.05, center_control: 0.2 | same |
+
+### Overnight Job
+
+**run_id=14** — epsilon-greedy, 14-feature engine, 400 games — launched at ~11:15 PM.
+Speed unknown with new features (estimate 40–70s/game); check first 10 games on wake.
+
+### Steps for Next Session
+
+1. **Check run_id=14 results** — confirm speed, decisive rate, weight signs for all 14 features
+2. **Assess draw-gradient analysis** for run_id=14 — check whether new features need draw_lr_scales
+3. **Investigate white/black asymmetry in run_id=13** — confirm whether it persists or was early noise
+4. **Run Stockfish benchmark** on run_id=14 weights — does the new architecture improve ELO above 1320?
+5. **Clarify "two apps" question** — four Shiny apps were open this session; user wanted to test two but we got sidetracked
+6. **Consider run_id=15** (softmax, 14 features) once run_id=14 is assessed

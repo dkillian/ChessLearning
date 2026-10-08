@@ -83,7 +83,7 @@ To start a session:
 
 ---
 
-## Current Architecture (as of Session 10)
+## Current Architecture (as of Session 11)
 
 ### Engine (`scripts/python/engine.py`)
 - **12 learnable positional features** (material features removed entirely)
@@ -91,15 +91,20 @@ To start a session:
   (queen=0.9, rook=0.5, bishop=0.3, knight=0.3, pawn=0.1 — scaled to TD target range)
 - Search: negamax with alpha-beta pruning
 
-### Learnable Features
-Pawn structure: `passed_pawn`, `doubled_pawn`, `isolated_pawn`, `pawn_advancement`
-King safety: `king_safety`
-Activity: `center_control`, `rook_open_file`, `connected_rooks`
-Coordination: `bishop_pair`, `rook_seventh`, `piece_development`, `mobility`
+### Learnable Features (14 total)
+Pawn structure: `passed_pawn`, `doubled_pawn`, `isolated_pawn`, `backward_pawn`, `pawn_advancement`
+King safety: `king_safety` (phase-scaled × phase)
+Activity: `center_control` (attacks + occupation), `rook_open_file`, `connected_rooks`
+Coordination: `knight_pst`, `bishop_pair`, `rook_seventh`, `piece_development`, `mobility` (phase-scaled × (0.5+0.5×phase))
+Pawn advancement: `pawn_advancement` (most advanced pawn; endgame-scaled × (0.5+0.5×end))
+
+### Game Phase Weighting
+`_game_phase(board)` returns midgame fraction [0,1] from weighted piece count / 24 (Q=4, R=2, N/B=1).
+Applied to: `king_safety` (× phase), `mobility` (× (0.5+0.5×phase)), `pawn_advancement` (× (0.5+0.5×end)).
 
 ### Training Script (`scripts/python/selfplay_td0.ipynb`)
 - **Temporal difference (0) bootstrapping**: target for position t = `-V(s_{t+1})`; terminal uses actual outcome
-- **Per-feature draw LR scales**: `draw_lr_scales = {'king_safety': 0.05}` — king_safety gets 5% LR during draws
+- **Per-feature draw LR scales**: `draw_lr_scales = {'king_safety': 0.05, 'center_control': 0.2}` — king_safety gets 5% LR during draws; center_control 20% (added run_id=14: center_control became top draw-gradient feature in run_id=13)
 - **`BASELINE_EVERY = None`** — random mover baseline disabled; engine wins 100% at all checkpoints (ceiling effect). Replace with Stockfish-at-low-ELO in future runs.
 - `selfplay_mc.ipynb` preserved as Monte Carlo archive
 - `selfplay_softmax.ipynb` — softmax selection + style modifiers variant (run_id=13+)
@@ -113,13 +118,16 @@ Coordination: `bishop_pair`, `rook_seventh`, `piece_development`, `mobility`
 | 10 | 50 | 2 | TD(0) + frozen material | Zero erosion confirmed |
 | 11 | 850 | 2 | Hard-coded material; 12 positional features | **78% decisive; all 8 significant signs correct** |
 | 12 | 1200 | 3 | Depth=3; king_safety draw_lr=0.05 | **84% decisive at game 600; declining to 80.4% at game 1200; center_control crossed zero** |
-| 13 | planned | 3 | Softmax selection (τ=0.05, top-10); style modifiers; `selfplay_softmax.ipynb` | TBD |
+| 13 | 212 | 3 | Softmax selection (τ=0.05, top-10); `selfplay_softmax.ipynb` | 69.4% decisive (regression); 2:1 black-wins asymmetry; pawn_advancement correct sign first time |
+| 14 | in progress | 3 | **14-feature engine**; epsilon-greedy; draw_lr center_control=0.2 | overnight run — results TBD |
+| 15 | planned | 3 | 14-feature engine; softmax | not yet started |
 
-### Current Weight State (run_id=12, game 1200)
-Correct sign (9/12): mobility (+0.250 — dominating), passed_pawn, rook_open_file, rook_seventh,
-king_safety, piece_development, connected_rooks, bishop_pair, isolated_pawn
-Wrong sign (3/12): doubled_pawn (−0.044), pawn_advancement (−0.103), center_control (−0.001, newly wrong)
-Note: `mobility` at 0.250 is ~3× the next feature — structural concern for feature design
+### Current Weight State (run_id=13, game 212 — last completed run)
+Correct sign (10/12): passed_pawn (+0.087), mobility (+0.068), rook_open_file (+0.032),
+piece_development (+0.029), rook_seventh (+0.022), king_safety (+0.021), center_control (+0.013),
+pawn_advancement (+0.009 — **correct for first time**), bishop_pair (+0.007), connected_rooks (+0.004)
+Wrong sign (2/12): doubled_pawn (−0.006), isolated_pawn (−0.010)
+Note: run_id=14 (14-feature engine) in progress overnight — weights not yet available
 
 ### Stockfish Integration
 - **Stockfish 19** installed via `winget install Stockfish.Stockfish`
