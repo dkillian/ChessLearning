@@ -120,10 +120,8 @@ run_td_update <- function(positions, outcome, weights_vec,
 create_new_run <- function(source_run_id, source_checkpoint, weights_vec) {
     con <- dbConnect(SQLite(), DB_PATH)
     dbExecute(con,
-        "INSERT INTO runs (started_at, depth, learning_rate, move_limit, epsilon,
-                           weight_init, notes)
-         SELECT datetime('now'), depth, learning_rate, move_limit, epsilon,
-                weight_init,
+        "INSERT INTO runs (started_at, depth, learning_rate, move_limit, notes)
+         SELECT datetime('now'), depth, learning_rate, move_limit,
                 printf('Human play — seeded from run_id=%d, game=%d', run_id, ?)
          FROM runs WHERE run_id = ? ORDER BY run_id LIMIT 1",
         list(source_checkpoint, source_run_id))

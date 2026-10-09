@@ -83,7 +83,7 @@ To start a session:
 
 ---
 
-## Current Architecture (as of Session 12)
+## Current Architecture (as of Session 13)
 
 ### Engine (`scripts/python/engine.py`)
 - **12 learnable positional features** (material features removed entirely)
@@ -121,15 +121,16 @@ Applied to: `king_safety` (× phase), `mobility` (× (0.5+0.5×phase)), `pawn_ad
 | 13 | 212 | 3 | Softmax selection (τ=0.05, top-10); `selfplay_softmax.ipynb` | 69.4% decisive (regression); 2:1 black-wins asymmetry; pawn_advancement correct sign first time |
 | 14 | 400 | 3 | **14-feature engine**; epsilon-greedy; draw_lr king_safety=0.05 center_control=0.2 | **81.2% decisive; 11/14 correct signs; benchmark 3W/1L/6D vs SF1320 (ELO ~1428)** |
 | 15 | 60+ | 3 | 14-feature engine; softmax τ=0.05 | 70% decisive; 11/14 correct signs; 2.8:1 black asymmetry persists |
-| 16 | 60+ | 3 | **Stockfish teacher** (SF ELO=1320); `selfplay_sf.ipynb`; move_limit=80 | ELO 1212→1267 over 60 games; no black/white asymmetry; 500-game overnight tranche running |
+| 16 | 560 | 3 | **Stockfish teacher** (SF ELO=1320); `selfplay_sf.ipynb`; move_limit=80 | ELO 1212→1267→1212 (peaked game 60, regressed by 560); 7/14 correct signs; **experiment abandoned** |
+| 17 | 1 | 3 | **Human play** via `07_human_play.R`; seeded from run_id=14 game 400 | TD error 0.0542 (77th pct of run_id=14); 11/14 correct signs; all top deltas correct direction |
 
-### Current Weight State (run_id=15, game 60 — most recent self-play run)
-Correct sign (11/14): passed_pawn (+0.045), king_safety (+0.031), piece_development (+0.027),
-mobility (+0.025), rook_open_file (+0.019), center_control (+0.016), backward_pawn (+0.012),
-bishop_pair (+0.006), pawn_advancement (+0.005), rook_seventh (+0.003), connected_rooks (+0.002)
-Wrong sign (3/14): knight_pst (−0.002), isolated_pawn (−0.006), doubled_pawn (−0.009)
-Note: run_id=16 (Stockfish teacher) has same sign pattern but ~10× smaller magnitudes at 60 games;
-500-game overnight tranche in progress — weights will be more developed by next session
+### Current Weight State (run_id=17, game 1 — human play, seeded from run_id=14 game 400)
+Correct sign (11/14): passed_pawn (+0.122), mobility (+0.100), center_control (+0.049),
+rook_open_file (+0.045), rook_seventh (+0.041), king_safety (+0.036), piece_development (+0.030),
+bishop_pair (+0.016), connected_rooks (+0.008), isolated_pawn (−0.001), doubled_pawn (−0.016)
+Wrong sign (3/14): backward_pawn (+0.024), knight_pst (−0.011), pawn_advancement (−0.022)
+Note: weights are seeded from run_id=14 game 400; magnitudes are large relative to prior runs;
+run_id=16 (SF teacher) confirmed abandoned — 7/14 correct signs at 560 games, ELO regressed to baseline
 
 ### Stockfish Integration
 - **Stockfish 19** installed via `winget install Stockfish.Stockfish`
@@ -168,7 +169,7 @@ Note: run_id=16 (Stockfish teacher) has same sign pattern but ~10× smaller magn
 | `scripts/r/05_search_explorer.R` | Shiny app — interactive move scorer; navigate positions, compare move rankings by depth |
 | `scripts/r/06_search_mechanics.R` | Step-by-step walkthrough: board evaluation feature-by-feature, negamax depth-by-depth |
 | `scripts/r/06_stockfish_arena.R` | Shiny app — Live Game (engine vs Stockfish) and ELO Benchmark read-only viewer (polls DB every 30s); run benchmarks via `05_stockfish_benchmark.R` |
-| `scripts/r/07_human_play.R` | Shiny app — Human vs engine with real TD(0) weight updates and post-game learning diagnostics |
+| `scripts/r/07_human_play.R` | Shiny app — Human vs engine with real TD(0) weight updates and post-game learning diagnostics; fixed Session 13: `create_new_run()` removed nonexistent `epsilon`/`weight_init` columns from INSERT |
 
 ---
 

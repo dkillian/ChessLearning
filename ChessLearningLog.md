@@ -24,7 +24,8 @@ Minor changes within a run (e.g., tranche size, LR adjustment) continue the same
 | 13 | 2026-10-07 | 212 | 3 | 0.001 | 200 | zero (positional) | softmax τ=0.05 | Softmax selection; 69.4% decisive (regression); 2:1 black-wins asymmetry; pawn_advancement correct sign for first time; center_control took over as top draw-gradient feature |
 | 14 | 2026-10-07 | 400 | 3 | 0.001 | 200 | zero | 0.1 | **14-feature engine**; epsilon-greedy; draw_lr king_safety=0.05 center_control=0.2; 81.2% decisive; 11/14 correct signs; benchmark 3W/1L/6D vs SF1320 (ELO ~1428) |
 | 15 | 2026-10-08 | 60+ | 3 | 0.001 | 200 | zero | softmax τ=0.05 | Softmax + 14-feature; 70% decisive; 11/14 correct signs at 60 games; 2.8:1 black asymmetry persists |
-| 16 | 2026-10-08 | 60+ | 3 | 0.001 | 80 | zero | N/A (SF moves) | **Stockfish teacher** (SF ELO=1320); `selfplay_sf.ipynb`; ELO 1212→1267 over first 60 games; no black/white asymmetry; 500-game overnight tranche running |
+| 16 | 2026-10-08 | 560 | 3 | 0.001 | 80 | zero | N/A (SF moves) | **Stockfish teacher** (SF ELO=1320); `selfplay_sf.ipynb`; ELO 1212→1267→1212 (peaked game 60, regressed to baseline by game 560); 7/14 correct signs at 560 games; experiment abandoned |
+| 17 | 2026-10-09 | 1 | 3 | 0.001 | — | seeded run_id=14 game_400 | N/A (human) | **Human play** via `07_human_play.R`; TD(0) updates from human games; 1 game played; TD error 0.0542 (77th pct of run_id=14); 11/14 correct signs maintained |
 
 ---
 
@@ -856,3 +857,62 @@ Speed unknown with new features (estimate 40–70s/game); check first 10 games o
 3. **Compare SF teacher vs self-play** — plot ELO trajectory and weight sign acquisition rate side-by-side for run_id=14 vs run_id=16
 4. **Consider next SF teacher experiment** — raise SF_ELO to 1400 once run_id=16 is competitive at 1320; or compare SF_ELO=1320 vs 1500 as separate runs
 5. **Update `05_stockfish_benchmark.R`** — run fresh benchmark for run_id=15 at 60+ games
+
+---
+
+## Session 13 — October 9, 2026
+
+### What We Worked On
+
+- Assessed run_id=16 overnight results (560 total games)
+- Decided to abandon the Stockfish teacher experiment; return to epsilon-greedy self-play
+- Fixed crash bug in `07_human_play.R` and played one human game (run_id=17)
+
+### run_id=16 Full Assessment (560 games, Stockfish teacher)
+
+**Outcomes (engine perspective vs SF 1320):**
+- Win: 40 (7.1%), Draw: 366 (65.4%), Loss: 154 (27.5%)
+- 65% of draws terminated by move_limit (80 halfmoves) — engine surviving, not winning
+
+**ELO trajectory:**
+
+| Games | Eval games | W/L/D | Score | Est. ELO |
+|-------|------------|-------|-------|----------|
+| 10    | 10         | 0/3/7 | 0.350 | ~1212    |
+| 60    | 20         | 2/5/13| 0.425 | ~1267    |
+| 560   | 30         | 3/12/15| 0.350 | ~1212   |
+
+ELO peaked at game 60 then returned to baseline — no net improvement from 500 more games of SF teaching.
+
+**Weight signs at game 560: 7/14 correct** — major regression from 11/14 at game 60.
+
+Notable wrong-sign weights: `passed_pawn` at −0.022 (largest by magnitude, wrong sign — was the best-learned feature in run_id=14); `doubled_pawn` at +0.016; `backward_pawn` at +0.003.
+
+### Decision: Abandon SF Teacher
+
+The Stockfish teacher at ELO 1320 (the minimum) sends confounding TD signals for pawn structure features. The 500-game overnight tranche produced no ELO gain and worsened sign correctness from 11/14 to 7/14. Key factors:
+
+- SF plays tactically complex positions that a 14-feature linear evaluator cannot parse
+- Move_limit draws mask losses, warping the draw-gradient signal for pawn features
+- ELO regression and sign regression are consistent with each other
+
+**Recommendation:** Use Stockfish only for benchmarking (as in run_id=14). Revisit SF teacher after future feature improvements bring the engine closer to SF's playing strength.
+
+### Bug Fix: `07_human_play.R`
+
+`create_new_run()` referenced `epsilon` and `weight_init` columns in the INSERT statement, but neither column exists in the `runs` table. Caused a crash when clicking "Start Session". Fixed by removing both columns from the INSERT/SELECT.
+
+### Human Play — run_id=17, Game 1
+
+- Seeded from run_id=14, game 400 (best checkpoint: 11/14 correct signs, ELO ~1428)
+- Outcome: 1-0, 83 halfmoves, natural conclusion
+- TD error: 0.0542 — 77th percentile of run_id=14 self-play distribution (avg 0.0442)
+- Top weight movers: `isolated_pawn` (−0.00184), `backward_pawn` (−0.00151), `piece_development` (+0.00101) — all in correct direction
+- Sign correctness after game 1: 11/14 maintained (no regression)
+- Human games provide stronger learning signal than average self-play (higher TD error = engine predictions more wrong = more surprise)
+
+### Steps for Next Session
+
+1. **Continue playing human games** via `07_human_play.R` (run_id=17, seeded from run_id=14 game 400); track whether the 3 wrong-sign features (`backward_pawn`, `knight_pst`, `pawn_advancement`) correct themselves with human game signal
+2. **Run epsilon-greedy self-play** (run_id=18, seeded from run_id=14 game 400) targeting 1000–1200 games — longer run than run_id=14 to see if remaining wrong-sign features resolve
+3. **Use SF only for benchmarking** — once run_id=18 is established, benchmark against SF 1320 to compare ELO to run_id=14
