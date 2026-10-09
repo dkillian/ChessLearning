@@ -14,11 +14,11 @@ library(reticulate)
 
 # ---- Configuration ----
 
-RUN_ID      <- 12       # which run's weights to use
-CHECKPOINT  <- NULL     # NULL = latest checkpoint; or set an integer game number
-ELO_LEVELS  <- 1320   # Stockfish ELO levels to test (minimum is 1320)
-N_GAMES     <- 2        # games per ELO level (even number = balanced colours)
-DEPTH       <- 3L       # search depth for our engine
+RUN_ID      <- 14          # which run's weights to use
+CHECKPOINT  <- NULL        # NULL = latest checkpoint; or set an integer game number
+ELO_LEVELS  <- 1320        # Stockfish ELO levels to test (minimum is 1320)
+N_GAMES     <- 10          # games per ELO level (even number = balanced colours)
+DEPTH       <- 3L          # search depth for our engine
 
 # ---- Setup ----
 

@@ -29,7 +29,7 @@ games <- tbl(con, "games") |>
 
 # Parameters ----
 
-RUN_ID     <- 13
+RUN_ID     <- 16
 GAME_START <- NULL   # set to integer to restrict to a tranche (NULL = all)
 GAME_END   <- NULL
 
@@ -38,12 +38,28 @@ GAME_END   <- NULL
 outcomes <- tbl(con, "games") |>
     filter(run_id == RUN_ID) |>
     tranche_filter() |>
-    count(outcome) |>
+    select(game_number, outcome, n_halfmoves, duration_s, terminated_by) |>
     collect() |>
-    mutate(pct = round(n / sum(n) * 100, 1)) |>
-    arrange(outcome)
+    mutate(
+        engine_color  = if_else(game_number %% 2 == 1, "White", "Black"),
+        engine_result = case_when(
+            outcome == "1-0" & engine_color == "White" ~ "Win",
+            outcome == "0-1" & engine_color == "Black" ~ "Win",
+            outcome == "1-0" & engine_color == "Black" ~ "Loss",
+            outcome == "0-1" & engine_color == "White" ~ "Loss",
+            TRUE ~ "Draw"
+        )
+    )
 
-outcomes
+# Per-game view
+outcomes |>
+    select(game_number, engine_color, outcome, engine_result, n_halfmoves, terminated_by)
+
+# Summary from engine's perspective
+outcomes |>
+    count(engine_result) |>
+    mutate(pct = round(n / sum(n) * 100, 1)) |>
+    arrange(factor(engine_result, levels = c("Win", "Draw", "Loss")))
 
 # Weights ----
 
@@ -77,7 +93,7 @@ ggplot(wts_trj, aes(x = game_number, y = weight_value)) +
 # which features drive deltas ---- 
 
 tbl(con, "weight_deltas") |>
-    filter(run_id == 13) |>
+    filter(run_id == RUN_ID) |>
     collect() |>
     left_join(
         tbl(con, "games") |> filter(run_id == 13) |>

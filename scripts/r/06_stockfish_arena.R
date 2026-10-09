@@ -100,25 +100,6 @@ board_svg_html <- function(board, last_move = NULL, flipped = FALSE, size = 390L
                 do.call(chess_svg$board, args), "</div>"))
 }
 
-play_one_game_vs_sf <- function(sf_inst, weights_py, engine_color, move_limit = 80L) {
-    board   <- chess_mod$Board()
-    n_half  <- 0L
-    while (!board$is_game_over() && n_half < move_limit) {
-        mv <- if (board$turn == engine_color) {
-            engine_mod$get_best_move(board, weights_py, 3L, FALSE)[[1]]
-        } else {
-            sf_inst$play(board, chess_engine$Limit(time = 0.5), ponder = FALSE)$move
-        }
-        if (is.null(mv)) break
-        board$push(mv)
-        n_half <- n_half + 1L
-    }
-    res <- board$result()
-    if      (res == "1-0") { if (engine_color == chess_mod$WHITE) "win" else "loss" }
-    else if (res == "0-1") { if (engine_color == chess_mod$BLACK) "win" else "loss" }
-    else "draw"
-}
-
 estimate_elo <- function(df) {
     df <- df |> arrange(sf_elo)
     if (nrow(df) < 2) return("Need \u22652 ELO levels")

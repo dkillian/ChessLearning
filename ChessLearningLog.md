@@ -22,8 +22,9 @@ Minor changes within a run (e.g., tranche size, LR adjustment) continue the same
 | 11 | 2026-10-05 | 850 | 2 | 0.001 | 200 | zero (positional) | 0.1 | **Material hard-coded in evaluator; material removed from weight vector; 78% decisive rate; all positional signs correct** |
 | 12 | 2026-10-05 | 1200 | 3 | 0.001 | 200 | zero (positional) | 0.1 | Depth=3; per-feature draw LR (king_safety=0.05); 84.2% decisive at game 600, 80.4% at game 1200 |
 | 13 | 2026-10-07 | 212 | 3 | 0.001 | 200 | zero (positional) | softmax τ=0.05 | Softmax selection; 69.4% decisive (regression); 2:1 black-wins asymmetry; pawn_advancement correct sign for first time; center_control took over as top draw-gradient feature |
-| 14 | 2026-10-07 | — | 3 | 0.001 | 200 | zero | 0.1 | **14-feature engine**; epsilon-greedy; draw_lr center_control=0.2 added; overnight run in progress |
-| 15 | 2026-10-07 | — | 3 | 0.001 | 200 | zero | softmax τ=0.05 | Same as 14 but softmax; not yet started |
+| 14 | 2026-10-07 | 400 | 3 | 0.001 | 200 | zero | 0.1 | **14-feature engine**; epsilon-greedy; draw_lr king_safety=0.05 center_control=0.2; 81.2% decisive; 11/14 correct signs; benchmark 3W/1L/6D vs SF1320 (ELO ~1428) |
+| 15 | 2026-10-08 | 60+ | 3 | 0.001 | 200 | zero | softmax τ=0.05 | Softmax + 14-feature; 70% decisive; 11/14 correct signs at 60 games; 2.8:1 black asymmetry persists |
+| 16 | 2026-10-08 | 60+ | 3 | 0.001 | 80 | zero | N/A (SF moves) | **Stockfish teacher** (SF ELO=1320); `selfplay_sf.ipynb`; ELO 1212→1267 over first 60 games; no black/white asymmetry; 500-game overnight tranche running |
 
 ---
 
@@ -788,3 +789,70 @@ Speed unknown with new features (estimate 40–70s/game); check first 10 games o
 4. **Run Stockfish benchmark** on run_id=14 weights — does the new architecture improve ELO above 1320?
 5. **Clarify "two apps" question** — four Shiny apps were open this session; user wanted to test two but we got sidetracked
 6. **Consider run_id=15** (softmax, 14 features) once run_id=14 is assessed
+
+---
+
+## Session 12 — October 8, 2026
+
+### What We Worked On
+
+- Reviewed and updated `ChessLearningDocumentation.md` to reflect 14-feature engine architecture (feature table, weight state, open questions, file descriptions, normalization notes)
+- Assessed run_id=14 (400 games), run_id=15 (60 games), and run_id=16 (60 training + 10/20 eval games)
+- Ran Stockfish benchmark for run_id=14 at ELO 1320
+- Built `selfplay_sf.ipynb` — new Stockfish-teacher training variant with built-in ELO estimation
+- Fixed three Shiny app bugs and one database integrity issue
+- Started overnight tranche for run_id=16 (N_GAMES=500, N_EVAL=30)
+
+### Key Findings
+
+**run_id=14 (epsilon-greedy, 14-feature, 400 games):**
+- 81.2% decisive rate; 11/14 correct weight signs
+- `mobility` dominance resolved by phase scaling (0.100 vs 0.250 in run_id=12)
+- `passed_pawn` back on top (+0.122); `backward_pawn` learned correct sign immediately
+- Black/white asymmetry persists: 46.5% black wins vs 34.8% white
+- **Stockfish benchmark: 3W/1L/6D at ELO 1320 — first-ever engine wins against a rated opponent**; estimated ELO ~1428
+
+**run_id=15 (softmax, 14-feature, 60 games):**
+- 70% decisive rate (improving from 65% at 20 games)
+- 11/14 correct signs at 60 games
+- Black/white asymmetry worsening under softmax: 2.8:1 (51.7% vs 18.3%)
+- `passed_pawn` leading (+0.045), `knight_pst` and `doubled_pawn` still wrong sign
+
+**run_id=16 (Stockfish teacher, SF ELO=1320, 60 training games):**
+- 0W/4L/6D in first 10 training games; all 6 draws hit 80-move limit (engine surviving, not collapsing)
+- **No black/white asymmetry** — color is balanced by design (alternating by game_number parity); decisive games split evenly across colors
+- ELO trajectory: 1212 (10 games) → 1267 (60 games), 95% CI 1088–1421 after 20 eval games
+- At 10 games, positional weights are near-zero → ELO 1212 reflects the hard-coded material evaluation baseline
+- Weight signs at 60 games: 10/14 correct (mostly correct; knight_pst, doubled_pawn, bishop_pair still noisy)
+
+**Database fix:**
+- Discovered 557 duplicate rows in `weights` table across all run_ids (some with different values, from accidental tranche restarts without RESUME=True)
+- Retained MIN(weight_id) per (run_id, game_number, feature_name); deleted 557 duplicates
+
+### New Scripts / Apps
+
+| File | Description |
+|---|---|
+| `scripts/python/selfplay_sf.ipynb` | Stockfish-teacher training: plays against Stockfish at configurable ELO, TD(0) updates, built-in ELO estimation (separate eval batch, no weight updates). `RUN_ID=16`, `MOVE_LIMIT=80`, Windows asyncio fix included. |
+
+### Bugs Fixed
+
+| File | Bug | Fix |
+|---|---|---|
+| `scripts/r/07_human_play.R` | Column names `n_half_moves` and `elapsed_sec` didn't match actual DB schema | Changed to `n_halfmoves` and `duration_s` |
+| `scripts/r/07_human_play.R` | `draw_lr_scales` missing `center_control = 0.2` in two locations | Added to function default and `end_game()` call site |
+| `scripts/r/06_stockfish_arena.R` | Dead `play_one_game_vs_sf()` function left over from old architecture | Removed |
+| `scripts/r/query self play notebook.R` | Outcomes section only showed raw game outcomes (1-0, 0-1, 1/2-1/2) | Added engine perspective columns (engine_color, engine_result) and summary table |
+| `scripts/python/selfplay_sf.ipynb` | `chess.engine.SimpleEngine.popen_uci()` raised `NotImplementedError` on Windows | Added `asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())` to Stockfish setup cell |
+
+### Overnight Job
+
+**run_id=16** — Stockfish teacher, SF ELO=1320, depth=3, N_GAMES=500, N_EVAL=30 — started ~9:28 PM, estimated completion before 8 AM. RESUME=True from game 61. ELO estimate at game ~560 will be logged to `stockfish_evals`.
+
+### Steps for Next Session
+
+1. **Check run_id=16 overnight results** — ELO estimate at ~560 total games; assess weight signs and decisive rate; compare ELO trajectory to self-play (run_id=14 estimated ~1428)
+2. **Assess run_id=15** — check if more tranches ran overnight; compare softmax vs epsilon-greedy weight convergence on 14-feature engine
+3. **Compare SF teacher vs self-play** — plot ELO trajectory and weight sign acquisition rate side-by-side for run_id=14 vs run_id=16
+4. **Consider next SF teacher experiment** — raise SF_ELO to 1400 once run_id=16 is competitive at 1320; or compare SF_ELO=1320 vs 1500 as separate runs
+5. **Update `05_stockfish_benchmark.R`** — run fresh benchmark for run_id=15 at 60+ games

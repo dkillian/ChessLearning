@@ -80,7 +80,8 @@ outcome_for_color <- function(outcome, is_white) {
 # Re-implementation of td_update() matching engine notebook exactly
 run_td_update <- function(positions, outcome, weights_vec,
                            lr = 0.001,
-                           draw_lr_scales = list(king_safety = 0.05)) {
+                           draw_lr_scales = list(king_safety = 0.05,
+                                                 center_control = 0.2)) {
     n       <- length(positions)
     is_draw <- outcome == "1/2-1/2"
 
@@ -143,7 +144,7 @@ log_human_game <- function(run_id, game_number, outcome, n_half,
                              elapsed, td_result, pgn_str) {
     con <- dbConnect(SQLite(), DB_PATH)
     dbExecute(con,
-        "INSERT INTO games (run_id,game_number,outcome,n_half_moves,elapsed_sec,terminated_by)
+        "INSERT INTO games (run_id,game_number,outcome,n_halfmoves,duration_s,terminated_by)
          VALUES (?,?,?,?,?,'natural')",
         list(run_id, game_number, outcome, n_half, elapsed))
     dbExecute(con,
@@ -443,7 +444,8 @@ server <- function(input, output, session) {
         # Run TD update
         result <- run_td_update(pos, outcome, wv,
             lr             = 0.001,
-            draw_lr_scales = list(king_safety = 0.05))
+            draw_lr_scales = list(king_safety = 0.05,
+                                  center_control = 0.2))
 
         # Update session weights
         session_weights(result$weights)

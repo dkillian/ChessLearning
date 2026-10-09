@@ -3,7 +3,7 @@
 **Activity**: Learning Study
 **Workspace**: Chess Learning
 **Initialized**: September 29, 2026
-**Status**: Active — depth=3 training running (run_id=12 complete at 1200 games; run_id=13 planned)
+**Status**: Active — 14-feature engine; run_id=13 complete (212 games, 12-feature); run_id=14 overnight (14-feature, results pending)
 
 ---
 
@@ -56,12 +56,12 @@ Concepts with high cross-run variance are contextually acquired.
 
 ### Engine Architecture
 
-A **linear evaluation function** with hard-coded material and 12 learnable positional features.
+A **linear evaluation function** with hard-coded material and 14 learnable positional features.
 
 ```
 board position
       ↓
-Feature Extractor  →  named positional feature vector (12 features)
+Feature Extractor  →  named positional feature vector (14 features)
       ↓
 Evaluator: hard-coded material score + weighted dot product (positional)  →  position score
       ↓
@@ -86,7 +86,8 @@ one step at a time and does not flatten earlier weights.
 
 A per-feature draw learning rate scale (`draw_lr_scales`) is applied to features with
 unusually high draw-gradient magnitude. Currently: `king_safety` gets 5% of normal LR
-during draws.
+during draws; `center_control` gets 20% (added in run_id=14 after it became the top
+draw-gradient feature in run_id=13).
 
 ### Move Selection
 
@@ -112,49 +113,52 @@ to the database. The cycle repeats continuously for the duration of a training r
 ## Chess Concept Features
 
 Material evaluation is **hard-coded** in the evaluator and not part of the learnable weight vector.
-The 12 learnable features are all positional:
+The 14 learnable features are all positional:
 
-| Feature Name | Description | Concept Tracked |
-|---|---|---|
-| `passed_pawn` | Pawns with no opposing pawns on same/adjacent files | Endgame pawn play |
-| `doubled_pawn` | Pawns on same file (penalty) | Pawn structure weakness |
-| `isolated_pawn` | Pawns with no friendly pawns on adjacent files (penalty) | Pawn structure weakness |
-| `pawn_advancement` | Total rank advancement of all pawns from starting rank | Pawn push tendency |
-| `king_safety` | Count of attackers near king | King protection |
-| `center_control` | Attacks on e4/d4/e5/d5 | Opening principles |
-| `rook_open_file` | Rooks on files with no pawns | Rook activity |
-| `connected_rooks` | Whether both rooks share a rank or file | Piece coordination |
-| `bishop_pair` | Having both bishops vs. opponent | Static piece advantage |
-| `rook_seventh` | Rooks on the 7th rank (2nd for black) | Rook infiltration |
-| `piece_development` | Minor pieces off their starting squares | Opening principles |
-| `mobility` | Squares attacked by all non-king pieces | Overall piece activity |
+| Feature Name | Description | Concept Tracked | Phase scaling |
+|---|---|---|---|
+| `passed_pawn` | Pawns with no opposing pawns on same/adjacent files | Endgame pawn play | — |
+| `doubled_pawn` | Pawns on same file (penalty) | Pawn structure weakness | — |
+| `isolated_pawn` | Pawns with no friendly pawns on adjacent files (penalty) | Pawn structure weakness | — |
+| `backward_pawn` | Pawn whose front square is attacked by enemy pawn with no adjacent support (penalty) | Pawn structure weakness | — |
+| `pawn_advancement` | Rank of the most advanced friendly pawn (÷ 5) | Pawn push tendency | × (0.5 + 0.5 × endgame) |
+| `king_safety` | Count of attackers near king | King protection | × phase |
+| `center_control` | Attacks on + occupation of e4/d4/e5/d5 (÷ 4) | Opening principles | — |
+| `rook_open_file` | Rooks on files with no pawns | Rook activity | — |
+| `connected_rooks` | Whether both rooks share a rank or file | Piece coordination | — |
+| `knight_pst` | PST summed over all knights (rim=−0.50, central=+0.20) (÷ 2) | Knight placement | — |
+| `bishop_pair` | Having both bishops vs. opponent | Static piece advantage | — |
+| `rook_seventh` | Rooks on the 7th rank (2nd for black) | Rook infiltration | — |
+| `piece_development` | Minor pieces off their starting squares | Opening principles | — |
+| `mobility` | Squares attacked by all non-king pieces (÷ 30) | Overall piece activity | × (0.5 + 0.5 × phase) |
 
 Features are computed from the perspective of the side to move (positive = good for side to move).
-
-**Feature normalization**: `mobility` is divided by 30 and `pawn_advancement` by 10 to bring
-raw values into the ±1 range consistent with TD target scale.
+Game phase is a midgame fraction [0, 1] computed by `_game_phase(board)` from weighted piece count ÷ 24 (Q=4, R=2, N/B=1).
 
 ---
 
-## Current Weight State (run_id=12, game 1200)
+## Current Weight State (run_id=13, game 212 — last completed run)
+
+Run_id=13 used the 12-feature engine (pre-redesign). Run_id=14 (14-feature engine) is in
+progress overnight; weights not yet available.
 
 | Feature | Weight | Status |
 |---|---|---|
-| `mobility` | +0.250 | ✓ — dominating evaluation (~3× next feature; structural concern) |
-| `passed_pawn` | +0.083 | ✓ |
-| `rook_open_file` | +0.066 | ✓ |
-| `bishop_pair` | +0.024 | ✓ |
-| `isolated_pawn` | +0.019 | ✓ |
-| `rook_seventh` | ~+0.046 | ✓ |
-| `king_safety` | ~+0.038 | ✓ |
-| `piece_development` | ~+0.021 | ✓ |
-| `connected_rooks` | ~+0.012 | ✓ |
-| `center_control` | −0.001 | ✗ (crossed zero at game 1200) |
-| `doubled_pawn` | −0.044 | ✗ (persists wrong sign) |
-| `pawn_advancement` | −0.103 | ✗ (worsening fast) |
+| `passed_pawn` | +0.087 | ✓ |
+| `mobility` | +0.068 | ✓ |
+| `rook_open_file` | +0.032 | ✓ |
+| `piece_development` | +0.029 | ✓ |
+| `rook_seventh` | +0.022 | ✓ |
+| `king_safety` | +0.021 | ✓ |
+| `center_control` | +0.013 | ✓ |
+| `pawn_advancement` | +0.009 | ✓ **correct sign for first time across all runs** |
+| `bishop_pair` | +0.007 | ✓ |
+| `connected_rooks` | +0.004 | ✓ |
+| `doubled_pawn` | −0.006 | ✗ |
+| `isolated_pawn` | −0.010 | ✗ |
 
-Correct signs: 9/12. `doubled_pawn` and `pawn_advancement` have been persistently wrong-signed
-across all depth=3 games; root cause under investigation.
+Correct signs: 10/12. `backward_pawn` and `knight_pst` not present in run_id=13 (added in
+Session 11 engine redesign; will appear in run_id=14+).
 
 ---
 
@@ -353,7 +357,7 @@ Chess Learning/                          ← Repo root
 
 | File | Description |
 |---|---|
-| `scripts/python/engine.py` | Importable module: 12-feature positional extractor, linear evaluator with hard-coded material, negamax search with alpha-beta. Used by all training notebooks. |
+| `scripts/python/engine.py` | Importable module: 14-feature positional extractor, linear evaluator with hard-coded material, negamax search with alpha-beta, `_game_phase()` helper. Used by all training notebooks. |
 | `scripts/python/engine.ipynb` | Stage 01 notebook: same content as `engine.py` with markdown explanations and 6 verification checks. Compatible with Positron and Colab. |
 | `scripts/python/selfplay_td0.ipynb` | Primary training script: `play_game`, `td_update` (TD(0)), `train`; epsilon-greedy move selection; SQLite logging of all tables. Configure via `RUN_ID`, `DEPTH`, `RESUME`, `N_GAMES`. |
 | `scripts/python/selfplay_softmax.ipynb` | Variant training script: softmax move selection (τ=0.05, top-10 candidates), style modifier presets (neutral/attacking/cautious/reckless/positional). RUN_ID=13+. |
@@ -397,13 +401,13 @@ Chess Learning/                          ← Repo root
 
 ## Open Questions
 
-- Why do `doubled_pawn` and `pawn_advancement` persistently show wrong signs? Is this a feature design issue, a depth artifact, or a genuine learning difficulty?
-- Why is `mobility` surging to dominate the evaluation (~3× the next feature)? Could be feature scale or a design artifact.
-- `center_control` currently counts only *attacks* on center squares, not occupation — 1.e4 scores for attacking d5, not for occupying e4. Should be redesigned before the 30-run study.
-- Does softmax selection (run_id=13) improve over epsilon-greedy in decisive rate and weight convergence?
-- What ELO does the engine achieve at depth=3, game 1200? First result: 0W/1L/0D vs Stockfish 1320 (ELO < 1320).
+- Why do `doubled_pawn` and `isolated_pawn` show wrong signs in run_id=13? Is this a feature design issue, a depth artifact, or genuine noise at 212 games?
+- Why did `mobility` surge to dominate the evaluation in run_id=12 (~3× the next feature)? Phase-scaling (added in Session 11) should mitigate this in run_id=14+.
+- Does softmax selection (run_id=13) improve over epsilon-greedy in decisive rate and weight convergence? (69.4% decisive in run_id=13 vs 84% in run_id=12 — regression, but confounded by short run length and earlier engine architecture.)
+- What ELO does the engine achieve at depth=3? First result: 0W/1L/0D vs Stockfish 1320 (ELO < 1320). Benchmark with 14-feature engine pending.
 - What threshold defines concept "emergence"? (Emergence = weight magnitude exceeds threshold consistently across checkpoints; calibration in progress.)
-- Is the architecture ready for the 30-run experimental design? Feature design issues (`doubled_pawn`, `pawn_advancement`, `center_control`) suggest iteration before committing.
+- Is the architecture ready for the 30-run experimental design? The 14-feature engine (run_id=14) is the candidate; assess once results are in.
+- **Planned experiment — Stockfish-as-teacher**: Create a training variant where the engine learns from games against Stockfish (at limited ELO) rather than self-play. Adapt `selfplay_td0.ipynb` to alternate colors against Stockfish, keeping TD(0) update logic identical. Could start at ELO 1320 and step up as the engine improves. Key question: does a calibrated external opponent produce faster or more correct weight convergence than self-play? Main cost: slower games than self-play (~30s vs longer Stockfish games).
 
 ---
 
@@ -412,9 +416,9 @@ Chess Learning/                          ← Repo root
 Ideas to consider before beginning the 30-run experimental series. Changing features
 mid-study would break cross-run comparability.
 
-| Feature | Issue | Proposed Improvement |
+| Feature | Issue | Status |
 |---|---|---|
-| `center_control` | Counts only *attacks* on d4/d5/e4/e5. A pawn occupying a center square is not credited — 1.e4 scores for attacking d5 diagonally, not for occupying e4. | Add occupation term: +1 per center square occupied by a friendly pawn. Classical theory treats occupation as stronger than attack. |
-| `doubled_pawn` | Persistently wrong sign (negative expected, positive learned). Unclear if feature design, scale, or depth artifact. | Investigate which game positions drive wrong-signed updates. Consider sign convention or normalization changes. |
-| `pawn_advancement` | Persistently wrong sign and worsening fast (−0.103 at game 1200). Raw values ÷ 10 may be insufficient normalization. | Investigate update distribution. Consider capping, redesigning as advancement of *advanced* pawns only, or removing. |
-| `mobility` | Surging to 0.250 (3× next feature). May reflect correct chess principle, but magnitude suggests possible scale issue. | Compare raw feature distributions to other features; consider additional normalization. |
+| `center_control` | Previously counted only *attacks* on d4/d5/e4/e5; pawn occupation not credited. | **Resolved** — occupation term added in Session 11 engine redesign; normalize by ÷ 4. |
+| `pawn_advancement` | Persistently wrong sign and worsening fast in run_id=12 (−0.103 at game 1200). | **Partially addressed** — redesigned in Session 11 as rank of most advanced pawn only (÷ 5) + endgame phase scaling. Correct sign in run_id=13 for first time. Monitor in run_id=14. |
+| `mobility` | Surged to 0.250 (3× next feature) in run_id=12. | **Partially addressed** — phase scaling added in Session 11 (× (0.5 + 0.5 × phase)) to suppress midgame dominance. Monitor in run_id=14. |
+| `doubled_pawn` | Wrong sign in run_id=12 and run_id=13. Unclear if feature design, scale, or noise. | **Open** — investigate which game positions drive wrong-signed updates. |

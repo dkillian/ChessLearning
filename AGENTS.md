@@ -83,7 +83,7 @@ To start a session:
 
 ---
 
-## Current Architecture (as of Session 11)
+## Current Architecture (as of Session 12)
 
 ### Engine (`scripts/python/engine.py`)
 - **12 learnable positional features** (material features removed entirely)
@@ -119,15 +119,17 @@ Applied to: `king_safety` (× phase), `mobility` (× (0.5+0.5×phase)), `pawn_ad
 | 11 | 850 | 2 | Hard-coded material; 12 positional features | **78% decisive; all 8 significant signs correct** |
 | 12 | 1200 | 3 | Depth=3; king_safety draw_lr=0.05 | **84% decisive at game 600; declining to 80.4% at game 1200; center_control crossed zero** |
 | 13 | 212 | 3 | Softmax selection (τ=0.05, top-10); `selfplay_softmax.ipynb` | 69.4% decisive (regression); 2:1 black-wins asymmetry; pawn_advancement correct sign first time |
-| 14 | in progress | 3 | **14-feature engine**; epsilon-greedy; draw_lr center_control=0.2 | overnight run — results TBD |
-| 15 | planned | 3 | 14-feature engine; softmax | not yet started |
+| 14 | 400 | 3 | **14-feature engine**; epsilon-greedy; draw_lr king_safety=0.05 center_control=0.2 | **81.2% decisive; 11/14 correct signs; benchmark 3W/1L/6D vs SF1320 (ELO ~1428)** |
+| 15 | 60+ | 3 | 14-feature engine; softmax τ=0.05 | 70% decisive; 11/14 correct signs; 2.8:1 black asymmetry persists |
+| 16 | 60+ | 3 | **Stockfish teacher** (SF ELO=1320); `selfplay_sf.ipynb`; move_limit=80 | ELO 1212→1267 over 60 games; no black/white asymmetry; 500-game overnight tranche running |
 
-### Current Weight State (run_id=13, game 212 — last completed run)
-Correct sign (10/12): passed_pawn (+0.087), mobility (+0.068), rook_open_file (+0.032),
-piece_development (+0.029), rook_seventh (+0.022), king_safety (+0.021), center_control (+0.013),
-pawn_advancement (+0.009 — **correct for first time**), bishop_pair (+0.007), connected_rooks (+0.004)
-Wrong sign (2/12): doubled_pawn (−0.006), isolated_pawn (−0.010)
-Note: run_id=14 (14-feature engine) in progress overnight — weights not yet available
+### Current Weight State (run_id=15, game 60 — most recent self-play run)
+Correct sign (11/14): passed_pawn (+0.045), king_safety (+0.031), piece_development (+0.027),
+mobility (+0.025), rook_open_file (+0.019), center_control (+0.016), backward_pawn (+0.012),
+bishop_pair (+0.006), pawn_advancement (+0.005), rook_seventh (+0.003), connected_rooks (+0.002)
+Wrong sign (3/14): knight_pst (−0.002), isolated_pawn (−0.006), doubled_pawn (−0.009)
+Note: run_id=16 (Stockfish teacher) has same sign pattern but ~10× smaller magnitudes at 60 games;
+500-game overnight tranche in progress — weights will be more developed by next session
 
 ### Stockfish Integration
 - **Stockfish 19** installed via `winget install Stockfish.Stockfish`
@@ -137,15 +139,26 @@ Note: run_id=14 (14-feature engine) in progress overnight — weights not yet av
 - Always pass `ponder=False` to `sf.play()` to prevent UCI communication hangs
 - `stockfish_evals` DB table logs aggregate match results (source = `'benchmark'` or `'live'`)
 - `stockfish_games` DB table logs individual game PGNs (created by `05_stockfish_benchmark.R`)
-- First benchmark result: engine lost to Stockfish 1320 (0W/1L/0D) — estimated ELO < 1320
+- **Session 12 benchmark (run_id=14, 400 games): 3W/1L/6D at ELO 1320 — estimated ELO ~1428**
+- `stockfish_evals` also receives ELO estimates from `selfplay_sf.ipynb` (source = `'sf_teacher'`)
+- Windows asyncio fix required in Jupyter: `asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())` before `popen_uci()`
 
 ---
+
+## Python Training Scripts
+
+| File | Purpose |
+|------|---------|
+| `scripts/python/engine.py` | Importable module: 14-feature positional extractor, linear evaluator with hard-coded material, negamax search with alpha-beta, `_game_phase()` helper |
+| `scripts/python/selfplay_td0.ipynb` | TD(0) self-play training; epsilon-greedy; current runs: 14 |
+| `scripts/python/selfplay_softmax.ipynb` | TD(0) self-play; softmax move selection (τ=0.05, top-10); current runs: 15 |
+| `scripts/python/selfplay_sf.ipynb` | **Stockfish teacher**: plays vs Stockfish at configurable ELO; TD(0) updates; built-in ELO estimation (clean eval batch, no weight updates); Windows asyncio fix included; current runs: 16 |
 
 ## R Analysis Scripts
 
 | File | Purpose |
 |------|---------|
-| `scripts/r/query self play notebook.R` | Parameterized assessment tool — set `RUN_ID`, `GAME_START`, `GAME_END` |
+| `scripts/r/query self play notebook.R` | Parameterized assessment tool — set `RUN_ID`, `GAME_START`, `GAME_END`; shows engine perspective (Win/Loss/Draw) for SF-teacher runs |
 | `scripts/r/03_visualize.qmd` | Full cross-run visualization |
 | `scripts/r/04_game_viewer.R` | Shiny app — game viewer with run selector |
 | `scripts/r/td_tutorial.qmd` | Tutorial: TD(0) learning via Scholar's Mate walkthrough |
