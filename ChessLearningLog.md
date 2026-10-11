@@ -916,3 +916,80 @@ The Stockfish teacher at ELO 1320 (the minimum) sends confounding TD signals for
 1. **Continue playing human games** via `07_human_play.R` (run_id=17, seeded from run_id=14 game 400); track whether the 3 wrong-sign features (`backward_pawn`, `knight_pst`, `pawn_advancement`) correct themselves with human game signal
 2. **Run epsilon-greedy self-play** (run_id=18, seeded from run_id=14 game 400) targeting 1000–1200 games — longer run than run_id=14 to see if remaining wrong-sign features resolve
 3. **Use SF only for benchmarking** — once run_id=18 is established, benchmark against SF 1320 to compare ELO to run_id=14
+
+---
+
+## Session 14 — October 10, 2026
+
+### What We Worked On
+
+- Reconstructed aborted session work from git diff and DB — all code and data intact; only the conversation transcript was lost
+- Implemented **v2 engine redesign** — three feature changes in `engine.py`:
+  - `backward_pawn`: tightened definition to require an enemy *pawn* (sentry) controlling the stop square, not any attacking piece
+  - `king_safety`: complete redesign — pawn shelter (friendly pawns 1–2 ranks ahead of king) minus attacker count in king zone; normalized by ÷ 3; replaces old "safe adjacent squares" heuristic
+  - `pawn_advancement`: changed from rank of single most advanced pawn (÷ 5) to total advancement of all pawns from starting rank (÷ 20); captures collective pawn mass advancement
+- Archived v1 training notebooks with version suffixes (`selfplay_td0_v1_runs1-14.ipynb`, `selfplay_softmax_v1_run15.ipynb`, `selfplay_sf_v1_run16.ipynb`)
+- Built **`public_app/`** — crowdsourced human-vs-engine Shiny app targeting shinyapps.io deployment; uses Supabase PostgreSQL backend; all public games contribute TD(0) updates to a shared run; chessboard.js drag-and-drop board
+- Updated `07_human_play.R`: added `engine_version` tracking, `SEED_RUN_ID = 18L`, helper functions for v2 run detection (`get_active_human_run`, `get_latest_game_number`, `parse_source_run_id`), `human_color` column logging
+- Continued run_id=17 to 5 human games (all white wins); sign correctness maintained at 11/14
+- Started **run_id=18** (v2 self-play, epsilon-greedy, depth=3, 20 games planned from zero)
+- Session aborted during attempted human play against v2 engine; crash source unidentified (likely Python/reticulate-level issue during depth=3 search); no data loss
+- Cleaned up stale run_id=19 (created with zero weights; deleted and will be recreated from checkpoint 10)
+
+### run_id=17 at Game 5 (human play, v1 engine, seeded from run_id=14 game 400)
+
+All five games: white wins (1-0). Sign correctness: 11/14 maintained — same 3 persistent wrong-sign features.
+
+| Feature | Weight | Status |
+|---|---|---|
+| `passed_pawn` | +0.120 | ✓ |
+| `mobility` | +0.105 | ✓ |
+| `center_control` | +0.052 | ✓ |
+| `rook_open_file` | +0.047 | ✓ |
+| `rook_seventh` | +0.044 | ✓ |
+| `king_safety` | +0.032 | ✓ |
+| `piece_development` | +0.027 | ✓ |
+| `backward_pawn` | +0.023 | ✗ |
+| `bishop_pair` | +0.018 | ✓ |
+| `connected_rooks` | +0.010 | ✓ |
+| `isolated_pawn` | −0.001 | ✓ |
+| `knight_pst` | −0.012 | ✗ |
+| `doubled_pawn` | −0.019 | ✓ |
+| `pawn_advancement` | −0.023 | ✗ |
+
+### run_id=18 at Checkpoint 10 (v2 engine, 10 games from zero)
+
+All weights are noise at this scale (max magnitude ~0.005). Too early to assess signs meaningfully. First real checkpoint for assessment will be at game 20.
+
+### New Scripts / Files Created
+
+| File | Description |
+|---|---|
+| `public_app/app.R` | Crowdsourced human-vs-engine Shiny app; Supabase PostgreSQL backend; chessboard.js drag-and-drop; shared TD(0) weight updates across all public players |
+| `public_app/engine.py` | Copy of `engine.py` for deployment alongside `public_app/app.R` |
+| `scripts/python/selfplay_td0_v1_runs1-14.ipynb` | Archived v1 TD(0) training notebook (runs 1–14) |
+| `scripts/python/selfplay_softmax_v1_run15.ipynb` | Archived v1 softmax training notebook (run 15) |
+| `scripts/python/selfplay_sf_v1_run16.ipynb` | Archived v1 Stockfish-teacher notebook (run 16) |
+
+### Session 14 (continued) — run_id=18 assessment and first v2 human game
+
+**run_id=18 completed (20 games).** Checkpoints at game_number=0, 10, 20.
+
+**Draw gradient analysis (corrected):** All v2 draw gradients dramatically smaller than v1. `king_safety` dropped to dead last (#14, 0.0000007) — was #1 in v1 requiring draw_lr=0.05. `center_control` #12 (0.000003) — was #2 requiring draw_lr=0.2. `pawn_advancement` #9 (0.000005) — was high in v1 (causing erosion). The `draw_lr_scales` corrections may not be needed for v2, though retained for safety pending more data. Note: based on only 2 draw games — confirm at larger scale.
+
+**run_id=19 created** — v2 human play run, seeded from run_id=18 game_number=20. First human game played: engine won as black (0-1), 102 half-moves. Gameplay noticeably stronger than v1 despite only 20 training games.
+
+**Weight signs after game 1 (run_id=19):** **12/14 correct** — improvement over v1's persistent 11/14.
+- `pawn_advancement` (+0.000357): ✓ **correct for first time in v2** (was wrong in all v1 runs)
+- `knight_pst` (+0.000435): ✓ **correct for first time** (was persistently wrong in v1)
+- `backward_pawn` (+0.005): ✗ still wrong
+- `connected_rooks` (−0.001): ✗ flipped wrong (was correct in v1 at depth=3)
+
+**Bug noted:** Duplicate weight rows in `weights` table for run_id=19, game_number=1 — 28 rows instead of 14. Values identical; weights correct but `log_human_game` appears to fire twice. Fix next session.
+
+### Steps for Next Session
+
+1. **Fix double-insert bug** in `07_human_play.R` — `log_human_game` fires twice at game end; investigate whether `end_game()` is being triggered from both the human-move and engine-move observers
+2. **Continue human games** (run_id=19, v2 engine) — track whether `pawn_advancement` and `knight_pst` hold correct signs; watch `backward_pawn` and `connected_rooks`
+3. **Update `engine.ipynb`** to v2 — still on v1 (has material features in weight vector; old king_safety, pawn_advancement, backward_pawn implementations)
+4. **Consider longer v2 self-play run** — run_id=18 is only 20 games; 400+ games needed to meaningfully compare sign correctness and decisive rate to v1 run_id=14

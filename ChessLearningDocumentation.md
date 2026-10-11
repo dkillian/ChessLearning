@@ -3,7 +3,7 @@
 **Activity**: Learning Study
 **Workspace**: Chess Learning
 **Initialized**: September 29, 2026
-**Status**: Active — 14-feature engine; run_id=13 complete (212 games, 12-feature); run_id=14 overnight (14-feature, results pending)
+**Status**: Active — 14-feature engine; run_id=17 (human play, seeded from run_id=14 game 400); self-play history through run_id=16 (SF teacher, abandoned)
 
 ---
 
@@ -120,9 +120,9 @@ The 14 learnable features are all positional:
 | `passed_pawn` | Pawns with no opposing pawns on same/adjacent files | Endgame pawn play | — |
 | `doubled_pawn` | Pawns on same file (penalty) | Pawn structure weakness | — |
 | `isolated_pawn` | Pawns with no friendly pawns on adjacent files (penalty) | Pawn structure weakness | — |
-| `backward_pawn` | Pawn whose front square is attacked by enemy pawn with no adjacent support (penalty) | Pawn structure weakness | — |
-| `pawn_advancement` | Rank of the most advanced friendly pawn (÷ 5) | Pawn push tendency | × (0.5 + 0.5 × endgame) |
-| `king_safety` | Count of attackers near king | King protection | × phase |
+| `backward_pawn` | Pawn whose stop square is controlled by an enemy **pawn** sentry + no adjacent friendly pawn support (penalty) | Pawn structure weakness | — |
+| `pawn_advancement` | Total rank advancement of **all** pawns from starting rank (÷ 20); captures collective pawn mass advancement | Pawn push tendency | × (0.5 + 0.5 × endgame) |
+| `king_safety` | Pawn shelter (friendly pawns 1–2 ranks ahead of king) minus attacker count in king zone (÷ 3) | King protection | × phase |
 | `center_control` | Attacks on + occupation of e4/d4/e5/d5 (÷ 4) | Opening principles | — |
 | `rook_open_file` | Rooks on files with no pawns | Rook activity | — |
 | `connected_rooks` | Whether both rooks share a rank or file | Piece coordination | — |
@@ -137,28 +137,31 @@ Game phase is a midgame fraction [0, 1] computed by `_game_phase(board)` from we
 
 ---
 
-## Current Weight State (run_id=13, game 212 — last completed run)
+## Current Weight State (run_id=17, game 1 — human play, seeded from run_id=14 game 400)
 
-Run_id=13 used the 12-feature engine (pre-redesign). Run_id=14 (14-feature engine) is in
-progress overnight; weights not yet available.
+Run_id=17 is the active human-play run. Weights are seeded from run_id=14 game 400 (best
+self-play checkpoint: 11/14 correct signs, estimated ELO ~1428). One human game played so far;
+sign correctness maintained at 11/14 with no regression.
 
 | Feature | Weight | Status |
 |---|---|---|
-| `passed_pawn` | +0.087 | ✓ |
-| `mobility` | +0.068 | ✓ |
-| `rook_open_file` | +0.032 | ✓ |
-| `piece_development` | +0.029 | ✓ |
-| `rook_seventh` | +0.022 | ✓ |
-| `king_safety` | +0.021 | ✓ |
-| `center_control` | +0.013 | ✓ |
-| `pawn_advancement` | +0.009 | ✓ **correct sign for first time across all runs** |
-| `bishop_pair` | +0.007 | ✓ |
-| `connected_rooks` | +0.004 | ✓ |
-| `doubled_pawn` | −0.006 | ✗ |
-| `isolated_pawn` | −0.010 | ✗ |
+| `passed_pawn` | +0.122 | ✓ |
+| `mobility` | +0.100 | ✓ |
+| `center_control` | +0.049 | ✓ |
+| `rook_open_file` | +0.045 | ✓ |
+| `rook_seventh` | +0.041 | ✓ |
+| `king_safety` | +0.036 | ✓ |
+| `piece_development` | +0.030 | ✓ |
+| `bishop_pair` | +0.016 | ✓ |
+| `connected_rooks` | +0.008 | ✓ |
+| `isolated_pawn` | −0.001 | ✓ |
+| `doubled_pawn` | −0.016 | ✓ |
+| `backward_pawn` | +0.024 | ✗ |
+| `knight_pst` | −0.011 | ✗ |
+| `pawn_advancement` | −0.022 | ✗ |
 
-Correct signs: 10/12. `backward_pawn` and `knight_pst` not present in run_id=13 (added in
-Session 11 engine redesign; will appear in run_id=14+).
+Correct signs: 11/14. Persistent wrong-sign features across multiple runs: `backward_pawn`,
+`knight_pst`, `pawn_advancement`.
 
 ---
 
@@ -330,6 +333,7 @@ Chess Learning/                          ← Repo root
 │   │   ├── engine.ipynb                 ← Stage 01: documented notebook with verification
 │   │   ├── selfplay_td0.ipynb           ← Stage 02: current training script (TD(0))
 │   │   ├── selfplay_softmax.ipynb       ← Stage 02 variant: softmax + style modifiers
+│   │   ├── selfplay_sf.ipynb            ← Stage 02 archive: Stockfish-teacher variant (abandoned after run_id=16)
 │   │   └── selfplay_mc.ipynb            ← Stage 02 archive: Monte Carlo version
 │   └── r/
 │       ├── query self play notebook.R   ← Parameterized assessment tool (set RUN_ID, GAME_START, GAME_END)
@@ -361,6 +365,7 @@ Chess Learning/                          ← Repo root
 | `scripts/python/engine.ipynb` | Stage 01 notebook: same content as `engine.py` with markdown explanations and 6 verification checks. Compatible with Positron and Colab. |
 | `scripts/python/selfplay_td0.ipynb` | Primary training script: `play_game`, `td_update` (TD(0)), `train`; epsilon-greedy move selection; SQLite logging of all tables. Configure via `RUN_ID`, `DEPTH`, `RESUME`, `N_GAMES`. |
 | `scripts/python/selfplay_softmax.ipynb` | Variant training script: softmax move selection (τ=0.05, top-10 candidates), style modifier presets (neutral/attacking/cautious/reckless/positional). RUN_ID=13+. |
+| `scripts/python/selfplay_sf.ipynb` | Stockfish-teacher variant (abandoned after run_id=16): plays against Stockfish at configurable ELO, TD(0) updates, built-in ELO estimation (separate eval batch, no weight updates). Windows asyncio fix included. Retained for reference. |
 | `scripts/python/selfplay_mc.ipynb` | Archived Monte Carlo version of the self-play loop. Superseded by TD(0). Retained for reference. |
 
 ### R Scripts
@@ -396,18 +401,19 @@ Chess Learning/                          ← Repo root
 | R for visualization | User preference; excellent for producing publication-quality charts |
 | Stockfish 19 for benchmarking | Provides ELO-limited opponents for strength estimation; minimum UCI_Elo = 1320 |
 | Background job for Stockfish benchmark | Prevents Shiny session blocking; arena app is now read-only |
+| Stockfish used for benchmarking only (not teaching) | SF-teacher experiment (run_id=16, 560 games) produced ELO regression (1267→1212) and sign regression (11/14→7/14); Stockfish plays tactically complex positions that a 14-feature linear evaluator cannot parse reliably. SF reserved for ELO benchmarking only. |
 
 ---
 
 ## Open Questions
 
-- Why do `doubled_pawn` and `isolated_pawn` show wrong signs in run_id=13? Is this a feature design issue, a depth artifact, or genuine noise at 212 games?
-- Why did `mobility` surge to dominate the evaluation in run_id=12 (~3× the next feature)? Phase-scaling (added in Session 11) should mitigate this in run_id=14+.
-- Does softmax selection (run_id=13) improve over epsilon-greedy in decisive rate and weight convergence? (69.4% decisive in run_id=13 vs 84% in run_id=12 — regression, but confounded by short run length and earlier engine architecture.)
-- What ELO does the engine achieve at depth=3? First result: 0W/1L/0D vs Stockfish 1320 (ELO < 1320). Benchmark with 14-feature engine pending.
+- Why do `backward_pawn`, `knight_pst`, and `pawn_advancement` show wrong signs persistently across multiple runs (run_id=14 and run_id=17)? Feature design issue, normalization artifact, or slow convergence requiring more games?
+- Why did `mobility` surge to dominate the evaluation in run_id=12 (~3× the next feature)? Phase-scaling (added in Session 11) resolved this in run_id=14 (0.100 vs 0.250).
+- Does softmax selection improve over epsilon-greedy in decisive rate and weight convergence? At comparable game counts, epsilon-greedy outperforms (81.2% decisive in run_id=14 vs 70% in run_id=15 at 60 games). Inconclusive — run_id=15 was not extended.
 - What threshold defines concept "emergence"? (Emergence = weight magnitude exceeds threshold consistently across checkpoints; calibration in progress.)
-- Is the architecture ready for the 30-run experimental design? The 14-feature engine (run_id=14) is the candidate; assess once results are in.
-- **Planned experiment — Stockfish-as-teacher**: Create a training variant where the engine learns from games against Stockfish (at limited ELO) rather than self-play. Adapt `selfplay_td0.ipynb` to alternate colors against Stockfish, keeping TD(0) update logic identical. Could start at ELO 1320 and step up as the engine improves. Key question: does a calibrated external opponent produce faster or more correct weight convergence than self-play? Main cost: slower games than self-play (~30s vs longer Stockfish games).
+- Is the architecture ready for the 30-run experimental design? The 14-feature engine (run_id=14) is the candidate; assess whether the 3 persistent wrong-sign features need resolution first.
+- Would longer self-play runs (e.g., 1000–1200 games, seeded from run_id=14 game 400) resolve the remaining wrong-sign features (`backward_pawn`, `knight_pst`, `pawn_advancement`)?
+- Does human game signal help correct the 3 wrong-sign features? run_id=17 has only 1 game so far; track sign changes across more human games.
 
 ---
 
@@ -419,6 +425,8 @@ mid-study would break cross-run comparability.
 | Feature | Issue | Status |
 |---|---|---|
 | `center_control` | Previously counted only *attacks* on d4/d5/e4/e5; pawn occupation not credited. | **Resolved** — occupation term added in Session 11 engine redesign; normalize by ÷ 4. |
-| `pawn_advancement` | Persistently wrong sign and worsening fast in run_id=12 (−0.103 at game 1200). | **Partially addressed** — redesigned in Session 11 as rank of most advanced pawn only (÷ 5) + endgame phase scaling. Correct sign in run_id=13 for first time. Monitor in run_id=14. |
-| `mobility` | Surged to 0.250 (3× next feature) in run_id=12. | **Partially addressed** — phase scaling added in Session 11 (× (0.5 + 0.5 × phase)) to suppress midgame dominance. Monitor in run_id=14. |
-| `doubled_pawn` | Wrong sign in run_id=12 and run_id=13. Unclear if feature design, scale, or noise. | **Open** — investigate which game positions drive wrong-signed updates. |
+| `pawn_advancement` | Persistently wrong sign: max-rank design (÷ 5) correct in run_id=13 only; reverted in run_id=14 and run_id=17. | **v2 redesign** (Session 14) — changed to total advancement of all pawns (÷ 20); early sign at run_id=18 game 10 is positive (correct). Under evaluation. |
+| `king_safety` | Old design (safe adjacent squares) is a weak proxy; doesn't capture pawn shelter or attacking piece threats directly. | **v2 redesign** (Session 14) — pawn shelter minus attacker count in king zone; ÷ 3; same phase scaling. Under evaluation in run_id=18. |
+| `backward_pawn` | Old definition used any attacking piece as the sentry; too broad, generating spurious penalties. | **v2 redesign** (Session 14) — now requires an enemy **pawn** to control the stop square (standard chess definition). Under evaluation in run_id=18. |
+| `mobility` | Surged to 0.250 (3× next feature) in run_id=12. | **Resolved** — phase scaling (× (0.5 + 0.5 × phase)) added in Session 11 suppressed dominance; 0.100 in run_id=14. |
+| `doubled_pawn` | Wrong sign in run_id=12 and run_id=13; correct in run_id=14 and run_id=17. | **Monitoring** — appears resolved at depth=3 with epsilon-greedy. |

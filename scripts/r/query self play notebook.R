@@ -29,7 +29,7 @@ games <- tbl(con, "games") |>
 
 # Parameters ----
 
-RUN_ID     <- 16
+RUN_ID     <- 18
 GAME_START <- NULL   # set to integer to restrict to a tranche (NULL = all)
 GAME_END   <- NULL
 
@@ -96,7 +96,7 @@ tbl(con, "weight_deltas") |>
     filter(run_id == RUN_ID) |>
     collect() |>
     left_join(
-        tbl(con, "games") |> filter(run_id == 13) |>
+        tbl(con, "games") |> filter(run_id == RUN_ID) |>
             select(game_number, outcome) |> collect(),
         by = "game_number"
     ) |>

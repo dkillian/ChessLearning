@@ -83,20 +83,20 @@ To start a session:
 
 ---
 
-## Current Architecture (as of Session 13)
+## Current Architecture (as of Session 14)
 
-### Engine (`scripts/python/engine.py`)
-- **12 learnable positional features** (material features removed entirely)
+### Engine (`scripts/python/engine.py`) — v2
+- **14 learnable positional features** (material features removed entirely)
 - **Material evaluation hard-coded** in `evaluate()` via `PIECE_VALUES` constant
   (queen=0.9, rook=0.5, bishop=0.3, knight=0.3, pawn=0.1 — scaled to TD target range)
 - Search: negamax with alpha-beta pruning
 
 ### Learnable Features (14 total)
-Pawn structure: `passed_pawn`, `doubled_pawn`, `isolated_pawn`, `backward_pawn`, `pawn_advancement`
-King safety: `king_safety` (phase-scaled × phase)
-Activity: `center_control` (attacks + occupation), `rook_open_file`, `connected_rooks`
-Coordination: `knight_pst`, `bishop_pair`, `rook_seventh`, `piece_development`, `mobility` (phase-scaled × (0.5+0.5×phase))
-Pawn advancement: `pawn_advancement` (most advanced pawn; endgame-scaled × (0.5+0.5×end))
+Pawn structure: `passed_pawn`, `doubled_pawn`, `isolated_pawn`, `backward_pawn` (pawn sentry definition), `pawn_advancement`
+King safety: `king_safety` (pawn shelter − attacker count; ÷ 3; phase-scaled × phase)
+Activity: `center_control` (attacks + occupation of d4/d5/e4/e5; ÷ 4), `rook_open_file`, `connected_rooks`
+Coordination: `knight_pst`, `bishop_pair`, `rook_seventh`, `piece_development`, `mobility` (÷ 30; phase-scaled × (0.5+0.5×phase))
+Pawn advancement: `pawn_advancement` (total advancement of **all** pawns from starting rank; ÷ 20; endgame-scaled × (0.5+0.5×end))
 
 ### Game Phase Weighting
 `_game_phase(board)` returns midgame fraction [0,1] from weighted piece count / 24 (Q=4, R=2, N/B=1).
@@ -122,15 +122,26 @@ Applied to: `king_safety` (× phase), `mobility` (× (0.5+0.5×phase)), `pawn_ad
 | 14 | 400 | 3 | **14-feature engine**; epsilon-greedy; draw_lr king_safety=0.05 center_control=0.2 | **81.2% decisive; 11/14 correct signs; benchmark 3W/1L/6D vs SF1320 (ELO ~1428)** |
 | 15 | 60+ | 3 | 14-feature engine; softmax τ=0.05 | 70% decisive; 11/14 correct signs; 2.8:1 black asymmetry persists |
 | 16 | 560 | 3 | **Stockfish teacher** (SF ELO=1320); `selfplay_sf.ipynb`; move_limit=80 | ELO 1212→1267→1212 (peaked game 60, regressed by 560); 7/14 correct signs; **experiment abandoned** |
-| 17 | 1 | 3 | **Human play** via `07_human_play.R`; seeded from run_id=14 game 400 | TD error 0.0542 (77th pct of run_id=14); 11/14 correct signs; all top deltas correct direction |
+| 17 | 5 | 3 | **Human play** (v1 engine); seeded from run_id=14 game 400; all white wins | 11/14 correct signs maintained; same 3 wrong-sign features persist |
+| 18 | 20 | 3 | **v2 engine** (redesigned king_safety, pawn_advancement, backward_pawn); epsilon-greedy from zero | Weights near-zero at checkpoint 10 (too early); pawn_advancement showed correct sign early |
+| 19 | 1 | 3 | **Human play v2**; seeded from run_id=18 game_number=20; engine won (0-1, 102 half-moves) | **12/14 correct signs**; pawn_advancement and knight_pst correct for first time; noticeably stronger play reported |
 
-### Current Weight State (run_id=17, game 1 — human play, seeded from run_id=14 game 400)
-Correct sign (11/14): passed_pawn (+0.122), mobility (+0.100), center_control (+0.049),
-rook_open_file (+0.045), rook_seventh (+0.041), king_safety (+0.036), piece_development (+0.030),
-bishop_pair (+0.016), connected_rooks (+0.008), isolated_pawn (−0.001), doubled_pawn (−0.016)
-Wrong sign (3/14): backward_pawn (+0.024), knight_pst (−0.011), pawn_advancement (−0.022)
-Note: weights are seeded from run_id=14 game 400; magnitudes are large relative to prior runs;
-run_id=16 (SF teacher) confirmed abandoned — 7/14 correct signs at 560 games, ELO regressed to baseline
+### Current Weight State (run_id=17, game 5 — human play v1; run_id=18 in progress v2)
+**run_id=17 (human play, v1 engine, seeded from run_id=14 game 400, 5 games):**
+Correct sign (11/14): passed_pawn (+0.120), mobility (+0.105), center_control (+0.052),
+rook_open_file (+0.047), rook_seventh (+0.044), king_safety (+0.032), piece_development (+0.027),
+bishop_pair (+0.018), connected_rooks (+0.010), isolated_pawn (−0.001), doubled_pawn (−0.019)
+Wrong sign (3/14): backward_pawn (+0.023), knight_pst (−0.012), pawn_advancement (−0.023)
+
+**run_id=18 (v2 engine, 20 games from zero — complete):**
+Checkpoints at game_number=0, 10, 20. Weights small (early); assessment pending longer run.
+
+**run_id=19 (v2 human play, seeded from run_id=18 game_number=20, 1 game):**
+Correct sign (12/14): passed_pawn (+0.013), rook_open_file (+0.013), mobility (+0.010),
+king_safety (+0.007), center_control (+0.005), piece_development (+0.005), rook_seventh (+0.003),
+bishop_pair (+0.003), knight_pst (+0.000), pawn_advancement (+0.000), doubled_pawn (−0.002), isolated_pawn (−0.003)
+Wrong sign (2/14): backward_pawn (+0.005), connected_rooks (−0.001)
+Note: pawn_advancement and knight_pst correct for first time (were persistently wrong in all v1 runs)
 
 ### Stockfish Integration
 - **Stockfish 19** installed via `winget install Stockfish.Stockfish`
@@ -150,10 +161,13 @@ run_id=16 (SF teacher) confirmed abandoned — 7/14 correct signs at 560 games, 
 
 | File | Purpose |
 |------|---------|
-| `scripts/python/engine.py` | Importable module: 14-feature positional extractor, linear evaluator with hard-coded material, negamax search with alpha-beta, `_game_phase()` helper |
-| `scripts/python/selfplay_td0.ipynb` | TD(0) self-play training; epsilon-greedy; current runs: 14 |
+| `scripts/python/engine.py` | Importable module: 14-feature positional extractor (v2), linear evaluator with hard-coded material, negamax search with alpha-beta, `_game_phase()` helper |
+| `scripts/python/selfplay_td0.ipynb` | TD(0) self-play training; epsilon-greedy; v2 engine; current runs: 18 |
 | `scripts/python/selfplay_softmax.ipynb` | TD(0) self-play; softmax move selection (τ=0.05, top-10); current runs: 15 |
-| `scripts/python/selfplay_sf.ipynb` | **Stockfish teacher**: plays vs Stockfish at configurable ELO; TD(0) updates; built-in ELO estimation (clean eval batch, no weight updates); Windows asyncio fix included; current runs: 16 |
+| `scripts/python/selfplay_sf.ipynb` | **Stockfish teacher** (abandoned after run_id=16): plays vs Stockfish at configurable ELO; retained for reference |
+| `scripts/python/selfplay_td0_v1_runs1-14.ipynb` | Archived v1 TD(0) notebook (runs 1–14) |
+| `scripts/python/selfplay_softmax_v1_run15.ipynb` | Archived v1 softmax notebook (run 15) |
+| `scripts/python/selfplay_sf_v1_run16.ipynb` | Archived v1 Stockfish-teacher notebook (run 16) |
 
 ## R Analysis Scripts
 
@@ -169,7 +183,9 @@ run_id=16 (SF teacher) confirmed abandoned — 7/14 correct signs at 560 games, 
 | `scripts/r/05_search_explorer.R` | Shiny app — interactive move scorer; navigate positions, compare move rankings by depth |
 | `scripts/r/06_search_mechanics.R` | Step-by-step walkthrough: board evaluation feature-by-feature, negamax depth-by-depth |
 | `scripts/r/06_stockfish_arena.R` | Shiny app — Live Game (engine vs Stockfish) and ELO Benchmark read-only viewer (polls DB every 30s); run benchmarks via `05_stockfish_benchmark.R` |
-| `scripts/r/07_human_play.R` | Shiny app — Human vs engine with real TD(0) weight updates and post-game learning diagnostics; fixed Session 13: `create_new_run()` removed nonexistent `epsilon`/`weight_init` columns from INSERT |
+| `scripts/r/07_human_play.R` | Shiny app — Human vs engine with real TD(0) weight updates and post-game learning diagnostics; v2-aware: auto-detects active v2 human run or creates one seeded from `SEED_RUN_ID`; logs `engine_version` and `human_color` |
+| `public_app/app.R` | Crowdsourced human-vs-engine Shiny app for shinyapps.io; Supabase PostgreSQL backend; chessboard.js drag-and-drop board; all public players share one evolving engine (PUBLIC_RUN_ID=1) |
+| `public_app/engine.py` | Copy of `engine.py` (v2) for deployment alongside `public_app/app.R` |
 
 ---
 

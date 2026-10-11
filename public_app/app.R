@@ -1,102 +1,95 @@
-# 07_human_play.R
-# Human (or external agent) plays our trained engine.
-# Each game contributes a real TD(0) weight update to a new run seeded
-# from a chosen source checkpoint.
-#
-# Board: interactive chessboard.js (drag-and-drop move entry).
-# Right panel shows live diagnostics during play, then post-game learning
-# analysis (weight deltas, learning moments, comparison to self-play).
-#
-# Run: shiny::runApp("scripts/r/07_human_play.R")
+# public_app/app.R
+# Crowdsourced human vs engine — public shinyapps.io deployment.
+# All human games contribute TD(0) weight updates to a shared Supabase run.
+# Weights evolve collectively across all players.
 
 library(shiny)
 library(bslib)
 library(bsicons)
 library(DBI)
-library(RSQLite)
+library(RPostgres)
 library(tidyverse)
 library(reticulate)
 
-# ---- Python modules ----
+# ---- Python environment ----
+# Install python-chess into a virtualenv on first cold start
 
-# Clear cached engine module so the app always loads the latest engine.py from disk
-py_run_string("import sys; sys.modules.pop('engine', None)")
+if (!virtualenv_exists("chess-public")) {
+    virtualenv_create("chess-public")
+    virtualenv_install("chess-public", "chess", ignore_installed = FALSE)
+}
+use_virtualenv("chess-public", required = TRUE)
 
 chess_mod  <- import("chess")
 chess_svg  <- import("chess.svg")
-engine_mod <- import_from_path("engine",
-    path = if (file.exists("../python/engine.py")) "../python" else "scripts/python")
+engine_mod <- import_from_path("engine", path = getwd())
 
-# ---- Paths ----
+# ---- Database ----
 
-DB_PATH     <- if (file.exists("../../data/chess_learning.db")) {
-    "../../data/chess_learning.db"
-} else {
-    "data/chess_learning.db"
+PG_CREDS <- list(
+    host     = "db.betniftrhjpeacfzjoym.supabase.co",
+    port     = 5432L,
+    dbname   = "postgres",
+    user     = "postgres",
+    password = Sys.getenv("SUPABASE_PASSWORD"),
+    sslmode  = "require"
+)
+
+PUBLIC_RUN_ID <- 1L
+
+pg_connect <- function() do.call(dbConnect, c(list(Postgres()), PG_CREDS))
+
+load_latest_weights <- function() {
+    pg  <- pg_connect()
+    gn  <- dbGetQuery(pg,
+        "SELECT MAX(game_number) FROM weights WHERE run_id = $1",
+        list(PUBLIC_RUN_ID))[[1]]
+    rows <- dbGetQuery(pg,
+        "SELECT feature_name, weight_value FROM weights
+         WHERE run_id = $1 AND game_number = $2",
+        list(PUBLIC_RUN_ID, gn))
+    dbDisconnect(pg)
+    setNames(rows$weight_value, rows$feature_name)
 }
-SEED_RUN_ID <- 18L  # v2 self-play run to seed from if no v2 human-play run exists yet
+
+log_public_game <- function(game_number, outcome, n_half, elapsed, td_result, pgn_str) {
+    pg <- pg_connect()
+    dbExecute(pg,
+        "INSERT INTO games (run_id, game_number, outcome, n_halfmoves, duration_s, terminated_by)
+         VALUES ($1, $2, $3, $4, $5, 'natural')",
+        list(PUBLIC_RUN_ID, game_number, outcome, n_half, elapsed))
+    dbExecute(pg,
+        "INSERT INTO game_records (run_id, game_number, pgn, td_error)
+         VALUES ($1, $2, $3, $4)",
+        list(PUBLIC_RUN_ID, game_number, pgn_str, td_result$td_error))
+    for (fname in names(td_result$deltas)) {
+        dbExecute(pg,
+            "INSERT INTO weight_deltas (run_id, game_number, feature_name, delta)
+             VALUES ($1, $2, $3, $4)",
+            list(PUBLIC_RUN_ID, game_number, fname, td_result$deltas[[fname]]))
+    }
+    for (fname in names(td_result$weights)) {
+        dbExecute(pg,
+            "INSERT INTO weights (run_id, game_number, feature_name, weight_value)
+             VALUES ($1, $2, $3, $4)",
+            list(PUBLIC_RUN_ID, game_number, fname, td_result$weights[[fname]]))
+    }
+    dbDisconnect(pg)
+}
+
+get_game_count <- function() {
+    pg  <- pg_connect()
+    n   <- dbGetQuery(pg,
+        "SELECT COUNT(*) FROM games WHERE run_id = $1",
+        list(PUBLIC_RUN_ID))[[1]]
+    dbDisconnect(pg)
+    n
+}
 
 # ---- Helpers ----
 
 `%||%` <- function(a, b) if (!is.null(a)) a else b
 
-get_run_ids <- function() {
-    con <- dbConnect(SQLite(), DB_PATH)
-    ids <- dbGetQuery(con, "SELECT DISTINCT run_id FROM weights ORDER BY run_id DESC")$run_id
-    dbDisconnect(con)
-    ids
-}
-
-# Returns run_id of the canonical v2 human-play run (oldest), or NULL if none exists
-get_active_human_run <- function() {
-    con  <- dbConnect(SQLite(), DB_PATH)
-    rows <- dbGetQuery(con,
-        "SELECT run_id FROM runs
-         WHERE notes LIKE 'Human play%' AND engine_version = 'v2'
-         ORDER BY run_id ASC LIMIT 1")
-    dbDisconnect(con)
-    if (nrow(rows) == 0) NULL else rows$run_id[1]
-}
-
-get_latest_game_number <- function(run_id) {
-    con <- dbConnect(SQLite(), DB_PATH)
-    gn  <- dbGetQuery(con, sprintf(
-        "SELECT COALESCE(MAX(game_number), 0) AS gn FROM games WHERE run_id = %d",
-        as.integer(run_id)))$gn
-    dbDisconnect(con)
-    as.integer(gn)
-}
-
-# Parse source run_id from notes: "Human play — seeded from run_id=X, game=Y"
-parse_source_run_id <- function(run_id) {
-    con   <- dbConnect(SQLite(), DB_PATH)
-    notes <- dbGetQuery(con, sprintf(
-        "SELECT notes FROM runs WHERE run_id = %d", as.integer(run_id)))$notes
-    dbDisconnect(con)
-    m <- regmatches(notes[1], regexpr("run_id=\\d+", notes[1]))
-    if (length(m) == 0) return(run_id)
-    as.integer(sub("run_id=", "", m))
-}
-
-get_checkpoints <- function(run_id) {
-    con  <- dbConnect(SQLite(), DB_PATH)
-    cpts <- dbGetQuery(con, sprintf(
-        "SELECT DISTINCT game_number FROM weights WHERE run_id=%d ORDER BY game_number DESC",
-        as.integer(run_id)))$game_number
-    dbDisconnect(con)
-    cpts
-}
-
-load_weights_vec <- function(run_id, game_number) {
-    con  <- dbConnect(SQLite(), DB_PATH)
-    rows <- dbGetQuery(con, sprintf(
-        "SELECT feature_name, weight_value FROM weights WHERE run_id=%d AND game_number=%d",
-        as.integer(run_id), as.integer(game_number)))
-    dbDisconnect(con)
-    setNames(rows$weight_value, rows$feature_name)
-}
-
-# Used for mini-boards in post-game learning moments
 board_svg_html <- function(board, last_move = NULL, flipped = FALSE, size = 160L) {
     args <- list(board = board, size = size, flipped = flipped)
     if (!is.null(last_move)) args$lastmove <- last_move
@@ -120,11 +113,9 @@ run_td_update <- function(positions, outcome, weights_vec,
                                                  center_control = 0.2)) {
     n       <- length(positions)
     is_draw <- outcome == "1/2-1/2"
-
-    values <- sapply(positions, function(p) sum(p$features * weights_vec[p$names]))
-
-    deltas <- setNames(numeric(length(weights_vec)), names(weights_vec))
-    errors <- numeric(n)
+    values  <- sapply(positions, function(p) sum(p$features * weights_vec[p$names]))
+    deltas  <- setNames(numeric(length(weights_vec)), names(weights_vec))
+    errors  <- numeric(n)
 
     for (t in seq_len(n)) {
         p      <- positions[[t]]
@@ -138,58 +129,11 @@ run_td_update <- function(positions, outcome, weights_vec,
     }
 
     new_weights <- weights_vec
-    for (fname in names(deltas)) {
+    for (fname in names(deltas))
         new_weights[[fname]] <- max(-50, min(50, weights_vec[[fname]] + deltas[[fname]]))
-    }
 
     list(weights = new_weights, deltas = deltas,
          td_error = mean(abs(errors)), errors = errors)
-}
-
-create_new_run <- function(source_run_id, source_checkpoint, weights_vec) {
-    con <- dbConnect(SQLite(), DB_PATH)
-    dbExecute(con,
-        "INSERT INTO runs (started_at, depth, learning_rate, move_limit, notes, engine_version)
-         SELECT datetime('now'), depth, learning_rate, move_limit,
-                printf('Human play \u2014 seeded from run_id=%d, game=%d', run_id, ?),
-                'v2'
-         FROM runs WHERE run_id = ? ORDER BY run_id LIMIT 1",
-        list(source_checkpoint, source_run_id))
-    new_run_id <- as.integer(dbGetQuery(con, "SELECT last_insert_rowid()")[[1]])
-    for (fname in names(weights_vec)) {
-        dbExecute(con,
-            "INSERT INTO weights (run_id, game_number, feature_name, weight_value)
-             VALUES (?, 0, ?, ?)",
-            list(new_run_id, fname, weights_vec[[fname]]))
-    }
-    dbDisconnect(con)
-    new_run_id
-}
-
-log_human_game <- function(run_id, game_number, outcome, n_half,
-                            elapsed, td_result, pgn_str, human_color) {
-    con <- dbConnect(SQLite(), DB_PATH)
-    dbExecute(con,
-        "INSERT INTO games (run_id,game_number,outcome,n_halfmoves,duration_s,terminated_by,human_color)
-         VALUES (?,?,?,?,?,'natural',?)",
-        list(run_id, game_number, outcome, n_half, elapsed, human_color))
-    dbExecute(con,
-        "INSERT INTO game_records (run_id,game_number,pgn,td_error)
-         VALUES (?,?,?,?)",
-        list(run_id, game_number, pgn_str, td_result$td_error))
-    for (fname in names(td_result$deltas)) {
-        dbExecute(con,
-            "INSERT INTO weight_deltas (run_id,game_number,feature_name,delta)
-             VALUES (?,?,?,?)",
-            list(run_id, game_number, fname, td_result$deltas[[fname]]))
-    }
-    for (fname in names(td_result$weights)) {
-        dbExecute(con,
-            "INSERT INTO weights (run_id,game_number,feature_name,weight_value)
-             VALUES (?,?,?,?)",
-            list(run_id, game_number, fname, td_result$weights[[fname]]))
-    }
-    dbDisconnect(con)
 }
 
 build_pgn <- function(san_moves) {
@@ -198,9 +142,7 @@ build_pgn <- function(san_moves) {
                  pairs, seq_along(pairs)), collapse = " ")
 }
 
-# ---- Static data (none required; run is auto-detected on startup) ----
-
-# ---- JavaScript: chessboard.js interactive board ----
+# ---- JavaScript: chessboard.js ----
 
 board_js <- HTML("
 $(document).ready(function () {
@@ -208,7 +150,7 @@ $(document).ready(function () {
   var board  = null;
   window.humanTurn  = false;
   window.humanColor = 'w';
-  window.prevHL     = [];   // squares highlighted in previous update
+  window.prevHL     = [];
 
   function onDragStart(source, piece) {
     if (!window.humanTurn) return false;
@@ -221,9 +163,9 @@ $(document).ready(function () {
     var move = chess.move({ from: source, to: target, promotion: 'q' });
     if (move === null) return 'snapback';
     window.humanTurn = false;
-    var uci = source + target + (move.promotion || '');
     Shiny.setInputValue('human_move_drop',
-      { uci: uci, nonce: Date.now() }, { priority: 'event' });
+      { uci: source + target + (move.promotion || ''), nonce: Date.now() },
+      { priority: 'event' });
   }
 
   function onSnapEnd() { board.position(chess.fen()); }
@@ -246,13 +188,11 @@ $(document).ready(function () {
     window.humanTurn  = msg.human_turn;
     window.humanColor = msg.human_color;
 
-    // Clear previous square highlights
     window.prevHL.forEach(function (sq) {
       $('#chessboard .square-' + sq).css('background', '');
     });
     window.prevHL = [];
 
-    // Last-move highlight (yellow)
     if (msg.lm_from) {
       $('#chessboard .square-' + msg.lm_from).css('background', 'rgba(255,214,0,0.4)');
       window.prevHL.push(msg.lm_from);
@@ -261,8 +201,6 @@ $(document).ready(function () {
       $('#chessboard .square-' + msg.lm_to).css('background', 'rgba(255,214,0,0.4)');
       window.prevHL.push(msg.lm_to);
     }
-
-    // Check highlight (red)
     if (msg.check_sq) {
       $('#chessboard .square-' + msg.check_sq).css('background', 'rgba(220,0,0,0.45)');
       window.prevHL.push(msg.check_sq);
@@ -276,7 +214,7 @@ $(document).ready(function () {
 # ---- UI ----
 
 ui <- page_sidebar(
-    title = "Human vs Engine",
+    title = "Teach the Chess Engine",
     theme = bs_theme(version = 5, bootswatch = "cosmo"),
 
     tags$head(
@@ -284,34 +222,45 @@ ui <- page_sidebar(
                   href = "https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css"),
         tags$script(src = "https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"),
         tags$script(src = "https://unpkg.com/chess.js@0.10.3/chess.js"),
-        tags$script(board_js)
+        tags$script(board_js),
+        tags$style(HTML("
+          .about-text { font-size: 0.85em; color: #555; line-height: 1.5; }
+        "))
     ),
 
     sidebar = sidebar(
-        width = 280,
+        width = 260,
 
         card(
-            card_header("Game"),
-            uiOutput("session_info"),
-            radioButtons("human_color", "I play as",
+            card_header("New Game"),
+            radioButtons("human_color", "Play as",
                 choices = c("White", "Black"), inline = TRUE),
             sliderInput("depth", "Engine depth",
-                min = 1, max = 3, value = 3, step = 1, width = "100%"),
-            actionButton("btn_new_game", "New Game",
+                min = 1, max = 3, value = 2, step = 1, width = "100%"),
+            actionButton("btn_new_game", "Start Game",
                 class = "btn-success w-100 mb-2"),
             actionButton("btn_resign", "Resign",
                 class = "btn-outline-danger btn-sm w-100")
+        ),
+
+        card(
+            card_header("About"),
+            p(class = "about-text",
+              "Every game you play teaches the engine. ",
+              "It uses ", tags$b("temporal difference learning"), " to update its ",
+              "positional weights after each game. ",
+              "All players share the same evolving engine.")
         )
     ),
 
     layout_column_wrap(
         width = 1/3, fill = FALSE,
-        value_box("Status",        uiOutput("vb_status"),
+        value_box("Status",       uiOutput("vb_status"),
                   theme = "primary",   showcase = bs_icon("circle-fill")),
-        value_box("Engine eval",   uiOutput("vb_eval"),
+        value_box("Engine eval",  uiOutput("vb_eval"),
                   theme = "secondary", showcase = bs_icon("speedometer")),
-        value_box("Session games", uiOutput("vb_game_count"),
-                  theme = "light",     showcase = bs_icon("list-ol"))
+        value_box("Games played", uiOutput("vb_game_count"),
+                  theme = "light",     showcase = bs_icon("people"))
     ),
 
     layout_columns(
@@ -348,38 +297,9 @@ ui <- page_sidebar(
 
 server <- function(input, output, session) {
 
-    # ── Session state — auto-initialized on startup ────────────────────────
-
-    .active_run <- get_active_human_run()
-    if (!is.null(.active_run)) {
-        .latest_ckpt <- get_checkpoints(.active_run)[1]
-        .wv          <- load_weights_vec(.active_run, .latest_ckpt)
-        .current_gn  <- get_latest_game_number(.active_run)
-        .src_id      <- parse_source_run_id(.active_run)
-    } else {
-        .gn         <- get_checkpoints(SEED_RUN_ID)[1]
-        .wv         <- load_weights_vec(SEED_RUN_ID, .gn)
-        .active_run <- create_new_run(SEED_RUN_ID, .gn, .wv)
-        .current_gn <- 0L
-        .src_id     <- SEED_RUN_ID
-    }
-    .con    <- dbConnect(SQLite(), DB_PATH)
-    .errors <- dbGetQuery(.con, sprintf(
-        "SELECT td_error FROM game_records WHERE run_id=%d AND td_error IS NOT NULL",
-        as.integer(.src_id)))$td_error
-    dbDisconnect(.con)
-
-    session_run_id  <- reactiveVal(.active_run)
-    session_weights <- reactiveVal(.wv)
-    game_number_rv  <- reactiveVal(.current_gn)
-    src_td_errors   <- reactiveVal(.errors)
-    source_run_info <- reactiveVal(list(run_id = .src_id,
-                                        checkpoint = get_checkpoints(.active_run)[1]))
-
-    output$session_info <- renderUI({
-        tags$small(style = "color:#888; display:block; margin-bottom:8px;",
-            paste0("Run ", session_run_id(), " \u00b7 ", game_number_rv(), " games played"))
-    })
+    # Load latest shared weights at session start
+    session_weights <- reactiveVal(load_latest_weights())
+    game_count_rv   <- reactiveVal(get_game_count())
 
     # ── Game state ─────────────────────────────────────────────────────────
     move_history <- reactiveVal(character(0))
@@ -399,7 +319,7 @@ server <- function(input, output, session) {
         b
     })
 
-    output$vb_game_count <- renderUI({ game_number_rv() })
+    output$vb_game_count <- renderUI({ game_count_rv() })
 
     # ── Board update helper ────────────────────────────────────────────────
 
@@ -428,7 +348,9 @@ server <- function(input, output, session) {
     # ── New game ──────────────────────────────────────────────────────────
 
     observeEvent(input$btn_new_game, {
-        req(!is.null(session_run_id()))
+        # Reload latest shared weights so this game builds on all prior learning
+        session_weights(load_latest_weights())
+
         col <- if (input$human_color == "White") chess_mod$WHITE else chess_mod$BLACK
         human_color(col)
         move_history(character(0))
@@ -472,7 +394,7 @@ server <- function(input, output, session) {
         eval_history(c(eval_history(), white_eval))
     }
 
-    # ── Human move (drag-and-drop) ─────────────────────────────────────────
+    # ── Human move ────────────────────────────────────────────────────────
 
     observeEvent(input$human_move_drop, {
         req(game_active())
@@ -480,7 +402,6 @@ server <- function(input, output, session) {
         b   <- current_board()
         req(b$turn == human_color())
 
-        # Server-side legality check
         legal_ucis <- sapply(reticulate::iterate(b$legal_moves), \(m) m$uci())
         req(uci %in% legal_ucis)
 
@@ -557,15 +478,20 @@ server <- function(input, output, session) {
             draw_lr_scales = list(king_safety = 0.05, center_control = 0.2))
 
         session_weights(result$weights)
-        gn  <- game_number_rv() + 1L
-        game_number_rv(gn)
-        hc <- if (human_color() == chess_mod$BLACK) "black" else "white"
-        log_human_game(session_run_id(), gn, outcome,
-                       length(move_history()), elapsed, result, build_pgn(move_san_log()), hc)
+
+        pg <- pg_connect()
+        gn <- dbGetQuery(pg,
+            "SELECT COALESCE(MAX(game_number), 0) + 1 FROM games WHERE run_id = $1",
+            list(PUBLIC_RUN_ID))[[1]]
+        dbDisconnect(pg)
+
+        log_public_game(gn, outcome, length(move_history()), elapsed,
+                        result, build_pgn(move_san_log()))
+
+        game_count_rv(game_count_rv() + 1L)
 
         post_game_rv(list(
             result   = result,
-            positions = pos,
             outcome  = outcome,
             n_half   = length(pos),
             moves    = move_history(),
@@ -583,7 +509,7 @@ server <- function(input, output, session) {
             label <- switch(gr, "1-0" = "White wins", "0-1" = "Black wins", "Draw")
             return(paste0(label, if (n > 0) paste0(" \u2014 ", n, " moves") else ""))
         }
-        if (n == 0) return("Starting position \u2014 your move")
+        if (n == 0) return("Your move \u2014 drag a piece to play")
         side <- if (current_board()$turn == chess_mod$WHITE) "White" else "Black"
         paste0(side, " to move \u2014 move ", ceiling(n / 2) + (n %% 2))
     })
@@ -612,7 +538,7 @@ server <- function(input, output, session) {
 
     output$fen_display <- renderText({ current_board()$fen() })
 
-    # ── Value box outputs ──────────────────────────────────────────────────
+    # ── Value boxes ───────────────────────────────────────────────────────
 
     output$vb_status <- renderUI({
         gr <- game_result()
@@ -620,7 +546,7 @@ server <- function(input, output, session) {
             switch(gr, "1-0" = "White wins", "0-1" = "Black wins", "Draw")
         } else if (game_active()) {
             if (current_board()$turn == human_color()) "Your turn" else "Engine thinking\u2026"
-        } else if (!is.null(session_run_id())) "Ready" else "No session"
+        } else "Start a game"
     })
 
     output$vb_eval <- renderUI({
@@ -631,23 +557,34 @@ server <- function(input, output, session) {
     # ── Diagnostics panel ──────────────────────────────────────────────────
 
     output$diag_header <- renderUI({
-        if (!is.null(post_game_rv()))  "Post-game analysis"
-        else if (game_active())        "Live diagnostics"
-        else                           "Diagnostics"
+        if (!is.null(post_game_rv()))  "What the engine learned"
+        else if (game_active())        "Live evaluation"
+        else                           "Engine weights"
     })
 
     output$diagnostics_panel <- renderUI({
         pg <- post_game_rv()
         if (!is.null(pg))   return(uiOutput("post_game_panel"))
         if (game_active())  return(uiOutput("live_panel"))
-        if (!is.null(session_run_id())) {
-            return(p(style = "color:#999; padding:16px;",
-                     "Start a new game to see live diagnostics."))
-        }
-        p(style = "color:#999; padding:16px;", "Start a session to begin.")
+        uiOutput("weights_panel")
     })
 
-    # Live panel ----
+    # Weights panel (shown before first game)
+    output$weights_panel <- renderUI({
+        card(
+            card_header("Current positional weights"),
+            tableOutput("weights_table")
+        )
+    })
+
+    output$weights_table <- renderTable({
+        wv <- session_weights()
+        tibble(Feature = names(wv), Weight = unname(wv)) |>
+            arrange(desc(abs(Weight))) |>
+            mutate(Weight = round(Weight, 4))
+    }, striped = TRUE, bordered = FALSE, small = TRUE)
+
+    # Live panel
     output$live_panel <- renderUI({
         tagList(
             card(
@@ -656,8 +593,8 @@ server <- function(input, output, session) {
                     tableOutput("feature_table"))
             ),
             card(
-                card_header("Evaluation trajectory (White\u2019s perspective)"),
-                plotOutput("eval_trajectory", height = "200px")
+                card_header("Evaluation (White\u2019s perspective)"),
+                plotOutput("eval_trajectory", height = "180px")
             )
         )
     })
@@ -690,44 +627,31 @@ server <- function(input, output, session) {
             theme_minimal(base_size = 12)
     })
 
-    # Post-game panel ----
+    # Post-game panel
     output$post_game_panel <- renderUI({
         req(!is.null(post_game_rv()))
         tagList(
             uiOutput("pg_summary_boxes"),
             card(
-                card_header("Weight changes from this game"),
-                plotOutput("pg_delta_chart", height = "240px")
-            ),
-            card(
-                card_header("Top learning moments"),
-                uiOutput("pg_moments")
-            ),
-            card(
-                card_header("This game vs self-play"),
-                plotOutput("pg_histogram", height = "200px")
+                card_header("What changed"),
+                plotOutput("pg_delta_chart", height = "220px")
             )
         )
     })
 
     output$pg_summary_boxes <- renderUI({
-        pg       <- post_game_rv()
+        pg <- post_game_rv()
         req(!is.null(pg))
-        sp_errors   <- src_td_errors()
-        sp_mean     <- if (length(sp_errors) > 0) mean(sp_errors) else NA_real_
-        rel_label   <- if (!is.na(sp_mean)) {
-            sprintf("%+.0f%% vs avg", (pg$td_error / sp_mean - 1) * 100)
-        } else "\u2014"
+        outcome_label <- switch(pg$outcome,
+            "1-0" = "White won", "0-1" = "Black won", "Draw")
         total_delta <- sum(abs(pg$result$deltas))
 
         layout_column_wrap(
-            width = 1/3, fill = FALSE,
-            value_box("TD error",     sprintf("%.4f", pg$td_error),
-                      theme = "primary",   showcase = bs_icon("lightning")),
-            value_box("vs self-play", rel_label,
-                      theme = "secondary", showcase = bs_icon("bar-chart")),
+            width = 1/2, fill = FALSE,
+            value_box("Result",    outcome_label,
+                      theme = "primary",   showcase = bs_icon("trophy")),
             value_box("Total \u0394w", sprintf("%.4f", total_delta),
-                      theme = "light",     showcase = bs_icon("arrow-left-right"))
+                      theme = "secondary", showcase = bs_icon("arrow-left-right"))
         )
     })
 
@@ -742,64 +666,9 @@ server <- function(input, output, session) {
             geom_col(width = 0.6) +
             geom_vline(xintercept = 0, linewidth = 0.4, color = "grey40") +
             scale_fill_manual(values = c(pos = "#d4edda", neg = "#f8d7da"), guide = "none") +
-            labs(x = "\u0394w (weight change)", y = NULL) +
+            labs(x = "\u0394w (weight change this game)", y = NULL) +
             theme_minimal(base_size = 12) +
             theme(panel.grid.major.y = element_blank())
-    })
-
-    output$pg_moments <- renderUI({
-        pg <- post_game_rv()
-        req(!is.null(pg))
-        errs     <- pg$result$errors
-        top3_idx <- order(abs(errs), decreasing = TRUE)[seq_len(min(3, length(errs)))]
-        moves_uci <- pg$moves
-        wv        <- session_weights()
-
-        cards <- lapply(top3_idx, function(t) {
-            b_t <- chess_mod$Board()
-            for (uci in head(moves_uci, t - 1L)) b_t$push(chess_mod$Move$from_uci(uci))
-            svg <- board_svg_html(b_t)
-
-            pred <- sum(pg$positions[[t]]$features * wv[pg$positions[[t]]$names])
-            tgt  <- if (t < length(errs)) {
-                -sum(pg$positions[[t + 1L]]$features * wv[pg$positions[[t + 1L]]$names])
-            } else {
-                outcome_for_color(pg$outcome, pg$positions[[t]]$is_white)
-            }
-
-            div(style = "display:inline-block; text-align:center; margin:8px; vertical-align:top;",
-                svg,
-                tags$small(
-                    tags$b(sprintf("Ply %d \u2014 |error| = %.3f", t, abs(errs[t]))),
-                    tags$br(),
-                    sprintf("Predicted: %+.3f \u2192 Target: %+.3f", pred, tgt)
-                )
-            )
-        })
-        div(style = "white-space:nowrap; overflow-x:auto;", do.call(tagList, cards))
-    })
-
-    output$pg_histogram <- renderPlot({
-        pg <- post_game_rv()
-        req(!is.null(pg))
-        sp <- src_td_errors()
-
-        if (length(sp) == 0) {
-            return(ggplot() + theme_void() +
-                annotate("text", x = 0, y = 0, label = "No self-play data available",
-                         color = "grey60"))
-        }
-
-        ggplot(tibble(td_error = sp), aes(x = td_error)) +
-            geom_histogram(bins = 30, fill = "#adc8f7", color = "white") +
-            geom_vline(xintercept = pg$td_error, color = "#0d6efd", linewidth = 1.2) +
-            annotate("text", x = pg$td_error, y = Inf, vjust = 1.5, hjust = -0.1,
-                     label = sprintf("This game\n%.4f", pg$td_error),
-                     color = "#0d6efd", size = 3.5) +
-            labs(x = "TD error", y = "Self-play games",
-                 title = sprintf("Run %d self-play distribution",
-                                 source_run_info()$run_id %||% 0)) +
-            theme_minimal(base_size = 12)
     })
 }
 
