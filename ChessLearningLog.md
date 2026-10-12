@@ -993,3 +993,79 @@ All weights are noise at this scale (max magnitude ~0.005). Too early to assess 
 2. **Continue human games** (run_id=19, v2 engine) — track whether `pawn_advancement` and `knight_pst` hold correct signs; watch `backward_pawn` and `connected_rooks`
 3. **Update `engine.ipynb`** to v2 — still on v1 (has material features in weight vector; old king_safety, pawn_advancement, backward_pawn implementations)
 4. **Consider longer v2 self-play run** — run_id=18 is only 20 games; 400+ games needed to meaningfully compare sign correctness and decisive rate to v1 run_id=14
+
+---
+
+## Session 15 — October 11, 2026
+
+### Summary
+
+Documentation and architecture session. Corrected a fundamental misunderstanding of
+the v2 sign convention, assessed run_id=18 fully, ran a Stockfish benchmark, created
+a strategic work plan, expanded the experimental design framework, and launched the
+first learnable-material run (run_id=20).
+
+### Key Findings
+
+**v2 sign convention corrected:** All 14 positional features should have positive weights
+in v2. Penalty features (`doubled_pawn`, `isolated_pawn`, `backward_pawn`) are negated
+in `extract_features()` — stored as (opponent_count − my_count) — so a positive weight
+is always correct. Previous assessments for runs 18 and 19 were re-scored under this
+corrected convention. AGENTS.md was updated accordingly.
+
+**run_id=18 full assessment (380 games):**
+- Decisive rate: 84.2% — matches the best prior self-play result (run_id=12 at 84%)
+- Correct signs: 11/14 (v2 convention)
+- Wrong signs: `doubled_pawn` (−), `pawn_advancement` (−), `knight_pst` (−)
+- Draw suppression confirmed: `king_safety` ~31× suppressed in draws; `center_control` ~4.5×
+- `isolated_pawn` started with correct negative sign, crossed zero around game 150, drifted positive
+
+**Stockfish benchmark (run_id=18, game 450):**
+- Result: 2W/1L/7D vs SF 1320
+- Score: 0.55, estimated ELO ~1355
+- Comparison: run_id=14 (v1) scored 0.60 → ~1390 ELO
+- Difference is within noise at 10 games per benchmark
+
+**run_id=19 sign assessment corrected:**
+- Under v2 convention: 11/14 correct (not 12/14 as logged last session)
+- `backward_pawn` (+0.005) is now correctly classified as correct (was misclassified)
+- `isolated_pawn` (−0.003) and `doubled_pawn` (−0.002) are wrong (were misclassified)
+
+**Double-insert bug (07_human_play.R):** Confirmed fixed via if/else branching.
+Deleted 14 duplicate weight rows from DB for run_id=19 game_number=1.
+
+**Experimental design framework expanded:**
+- Conditions framed as a spectrum from naive (no rules) to fully informed (hard-coded material + explicit features)
+- Linear evaluator covers conditions 3–5; neural net needed for conditions 1–2
+- Engine files to be maintained as first-class research artifacts, one per condition
+
+**Engine versioning:**
+- `engine_hardcoded_material.py` — clean archive of the current condition (runs 1–19)
+- `engine_learnable_material.py` — new condition: 19 learnable features (5 material + 14 positional); no hard-coded piece values
+
+**run_id=20 launched (learnable material condition):**
+- 20-game check: 85% decisive, 16/19 correct signs, all 5 material weights positive
+- Material ordering not yet correct (rook > pawn > bishop ≈ knight > queen; target: queen > rook > bishop ≈ knight > pawn)
+- Overnight tranche running
+
+### New Scripts / Files Created
+
+| File | Description |
+|---|---|
+| `ChessLearningWorkPlan.md` | Multi-session strategic work plan |
+| `scripts/python/engine_hardcoded_material.py` | Archive of current engine condition (runs 1–19): 14 positional features, hard-coded material |
+| `scripts/python/engine_learnable_material.py` | New engine condition (run 20+): 19 features — 5 material + 14 positional; no hard-coded piece values |
+| `scripts/python/selfplay_learnable_material.ipynb` | Training notebook for run_id=20; imports `engine_learnable_material` |
+
+### Overnight Jobs
+
+**run_id=20** (`selfplay_learnable_material.ipynb`) running overnight. Will resume with
+`RESUME = True` for additional tranches as needed.
+
+### Steps for Next Session
+
+1. **Assess run_id=20 overnight results** — outcomes, weight ordering, sign correctness
+2. **Check material weight ordering** — watch for queen to pull ahead of pawn/rook as more games accumulate
+3. **Diagnose the 3 persistently wrong-sign features** — `doubled_pawn`, `pawn_advancement`, `knight_pst` (delta distribution, trajectory, feature-outcome correlation)
+4. **If run_id=20 is viable** — add engine condition menu to `07_human_play.R` so the human player can choose which engine configuration to play against
+5. **Update `engine.ipynb`** to v2 architecture

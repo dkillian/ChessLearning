@@ -14,7 +14,7 @@ library(reticulate)
 
 # ---- Configuration ----
 
-RUN_ID      <- 14          # which run's weights to use
+RUN_ID      <- 18          # which run's weights to use
 CHECKPOINT  <- NULL        # NULL = latest checkpoint; or set an integer game number
 ELO_LEVELS  <- 1320        # Stockfish ELO levels to test (minimum is 1320)
 N_GAMES     <- 10          # games per ELO level (even number = balanced colours)

@@ -92,16 +92,29 @@ ggplot(wts_trj, aes(x = game_number, y = weight_value)) +
 
 # which features drive deltas ---- 
 
-tbl(con, "weight_deltas") |>
+# Goal: compare mean absolute weight update by feature and outcome.
+# Large draw updates signal features that are "confused" by drawn positions.
+# draw_lr_scales (king_safety=0.05, center_control=0.20) should suppress
+# those features' draw updates relative to wins/losses.
+
+deltas <- tbl(con, "weight_deltas") |>
+    # Pull all weight updates for this run
     filter(run_id == RUN_ID) |>
     collect() |>
+    # Attach game outcome (1-0, 0-1, 1/2-1/2) so we can split by result
     left_join(
-        tbl(con, "games") |> filter(run_id == RUN_ID) |>
-            select(game_number, outcome) |> collect(),
+        tbl(con, "games") |>
+            filter(run_id == RUN_ID) |>
+            select(game_number, outcome) |>
+            collect(),
         by = "game_number"
     ) |>
-    filter(outcome == "1/2-1/2") |>
-    group_by(feature_name) |>
+    # Average |delta| per feature per outcome
+    group_by(feature_name, outcome) |>
     summarise(mean_abs_delta = mean(abs(delta)), .groups = "drop") |>
-    arrange(desc(mean_abs_delta))
+    # Reshape: one column per outcome for easy side-by-side comparison
+    pivot_wider(names_from = outcome, values_from = mean_abs_delta) |>
+    # Sort by draw activity — the features most affected by draws rise to top
+    arrange(desc(`1/2-1/2`))
 
+deltas
