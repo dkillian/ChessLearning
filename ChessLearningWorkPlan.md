@@ -1,6 +1,6 @@
 # Chess Learning — Strategic Review and Work Plan
 
-*Prepared October 11, 2026 (Session 15)*
+*Prepared October 11, 2026 (Session 15) — updated October 12, 2026 (Session 16)*
 
 ---
 
@@ -36,25 +36,32 @@ public crowdsourced app (`public_app/`) were built.
 
 ## Where We Are Now
 
-**Engine state:**
-- v2 engine, depth=3, epsilon-greedy, TD(0)
-- run_id=18: 380 self-play games from zero; 84.2% decisive; 11/14 correct signs
-- run_id=19: 1 human game; 11/14 correct signs
-- Persistently wrong-sign features (3/14): `doubled_pawn` (−), `pawn_advancement` (−), `knight_pst` (−)
-- Draw suppression working: `king_safety` ~31× suppressed in draws; `center_control` ~4.5×
+*(Updated Session 16, October 12, 2026)*
 
-**Known bugs / stale items:**
-- Double-insert bug in `07_human_play.R`: `log_human_game` fires twice at game end; duplicate weight rows in DB for run_id=19
-- `ChessLearningDocumentation.md` is stale (still reflects run_id=17 / session 14 state)
-- `engine.ipynb` not updated to v2 architecture
-- Session log has no entry for Session 15 (today) yet
+**Engine state:**
+- Two engine conditions in active development:
+  - `engine.py` (hardcoded material, v2): 14 positional features — baseline for 30-run design
+  - `engine_learnable_material.py` (learnable material): 19 features — experimental; `knight_outpost` replaced `knight_pst` in Session 16
+- run_id=20 (learnable material, 510 games): 76.1% decisive; 16/19 correct signs; ELO ~1285; material weights plateaued (rook > queen)
+- run_id=21 (learnable material, `knight_outpost`, from zero): first 50-game tranche in progress
+- run_id=18 (hardcoded material v2 baseline): 84.2% decisive; 11/14 correct signs; ELO ~1355
+
+**Resolved this session:**
+- Double-insert bug in `07_human_play.R`: ✅ fixed (Session 15)
+- Wrong-sign diagnostics: ✅ completed — three distinct failure modes identified (Session 16)
+- `knight_pst` redesigned → `knight_outpost`: ✅ implemented (Session 16)
+- Stockfish benchmark for learnable material: ✅ 2W/4L/14D, ELO ~1285 (Session 16)
+
+**Still stale:**
+- `ChessLearningDocumentation.md`: reflects Session 14 state
+- `engine.ipynb`: not updated to v2 architecture
 
 **Strategic position:**
-The core research goal — 30 independent runs to study concept acquisition sequence —
-has not yet started. Every session so far has been architecture development.
-The 30-run design requires a **stable architecture**: one where sign correctness,
-decisive rate, and weight trajectories are consistent enough that we trust the
-patterns as signal rather than artifacts.
+The learnable material condition (run_id=20/21) is an active experiment running in parallel
+with the hardcoded-material baseline. The 30-run experimental design has not yet started.
+The key open question is whether the learnable material condition can match the hardcoded
+baseline's performance — or whether we proceed with the 30-run design using hardcoded material
+while continuing to explore learnable material separately.
 
 ---
 
@@ -156,10 +163,10 @@ checkpoint where the weight exceeds a threshold and holds.
 
 | Session | Primary Goal |
 |---------|-------------|
-| 15 (today) | Bug fix + wrong-sign diagnostics + benchmark launch |
-| 16 | Assess benchmark + launch longer v2 self-play (run_id=20, 1000 games) |
-| 17 | Assess run_id=20 at ~500 games + make architecture decision |
-| 18 | Update docs + begin 30-run experimental design (or one more redesign) |
+| 15 | ✅ Bug fix + wrong-sign diagnostics + benchmark launch |
+| 16 | ✅ Assess benchmark + wrong-sign diagnosis + `knight_outpost` redesign + launch run_id=21 |
+| 17 | Assess run_id=21 at ~500 games; architecture decision (proceed to 30-run design or continue redesign) |
+| 18 | Launch 30-run experimental design (hardcoded material baseline) and/or continue learnable material exploration |
 | 19+ | Monitor first few experimental runs; build cross-run analysis in `03_visualize.qmd` |
 
 ---

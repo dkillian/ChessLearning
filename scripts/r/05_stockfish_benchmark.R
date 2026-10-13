@@ -14,11 +14,12 @@ library(reticulate)
 
 # ---- Configuration ----
 
-RUN_ID      <- 18          # which run's weights to use
-CHECKPOINT  <- NULL        # NULL = latest checkpoint; or set an integer game number
-ELO_LEVELS  <- 1320        # Stockfish ELO levels to test (minimum is 1320)
-N_GAMES     <- 10          # games per ELO level (even number = balanced colours)
-DEPTH       <- 3L          # search depth for our engine
+RUN_ID        <- 21          # which run's weights to use
+CHECKPOINT    <- NULL        # NULL = latest checkpoint; or set an integer game number
+ELO_LEVELS    <- 1320        # Stockfish ELO levels to test (minimum is 1320)
+N_GAMES       <- 20          # games per ELO level (even number = balanced colours)
+DEPTH         <- 3L          # search depth for our engine
+ENGINE_MODULE <- "engine_learnable_material"  # "engine" (runs 1-19) or "engine_learnable_material" (run 20+)
 
 # ---- Setup ----
 
@@ -44,7 +45,7 @@ chess_mod    <- import("chess")
 chess_pgn    <- import("chess.pgn")
 chess_engine <- import("chess.engine")
 io_mod       <- import("io")
-engine_mod   <- import_from_path("engine", path = ENGINE_PATH)
+engine_mod   <- import_from_path(ENGINE_MODULE, path = ENGINE_PATH)
 
 # ---- Load weights ----
 
@@ -110,12 +111,12 @@ build_pgn_str <- function(sans, result, engine_color, sf_elo) {
 
 # ---- Game function ----
 
-play_one_game <- function(sf_inst, engine_color, move_limit = 80L) {
+play_one_game <- function(sf_inst, engine_color) {
     board  <- chess_mod$Board()
     n_half <- 0L
     sans   <- character(0)   # collect SAN for PGN
 
-    while (!board$is_game_over() && n_half < move_limit) {
+    while (!board$is_game_over(claim_draw = TRUE)) {
         mv <- if (board$turn == engine_color) {
             engine_mod$get_best_move(board, weights_py, DEPTH, FALSE)[[1]]
         } else {
@@ -127,7 +128,7 @@ play_one_game <- function(sf_inst, engine_color, move_limit = 80L) {
         n_half <- n_half + 1L
     }
 
-    res <- board$result()
+    res <- board$result(claim_draw = TRUE)
     list(
         result     = res,
         n_half     = n_half,

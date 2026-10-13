@@ -66,7 +66,7 @@ FEATURE_NAMES = [
     "rook_open_file",
     "connected_rooks",
     # Piece coordination & development
-    "knight_pst",       # piece-square table score for knights
+    "knight_outpost",   # safe knights in opponent's half not attacked by opponent pawn
     "bishop_pair",
     "rook_seventh",
     "piece_development",
@@ -74,19 +74,7 @@ FEATURE_NAMES = [
     "pawn_advancement", # total advancement of all pawns; phase-scaled (endgame)
 ]
 
-# Knight piece-square table (White's perspective; rank 0 = White's back rank).
-# Values in pawn fractions: rim squares ≈ −0.50, central outposts ≈ +0.20.
-# Mirrored vertically for Black.
-_KNIGHT_PST = [
-    -0.50, -0.40, -0.30, -0.30, -0.30, -0.30, -0.40, -0.50,  # rank 0
-    -0.40, -0.20,  0.00,  0.00,  0.00,  0.00, -0.20, -0.40,  # rank 1
-    -0.30,  0.00,  0.10,  0.15,  0.15,  0.10,  0.00, -0.30,  # rank 2
-    -0.30,  0.05,  0.15,  0.20,  0.20,  0.15,  0.05, -0.30,  # rank 3
-    -0.30,  0.00,  0.15,  0.20,  0.20,  0.15,  0.00, -0.30,  # rank 4
-    -0.30,  0.05,  0.10,  0.15,  0.15,  0.10,  0.05, -0.30,  # rank 5
-    -0.40, -0.20,  0.00,  0.05,  0.05,  0.00, -0.20, -0.40,  # rank 6
-    -0.50, -0.40, -0.30, -0.30, -0.30, -0.30, -0.40, -0.50,  # rank 7
-]
+
 
 
 def default_weights(init: str = "zero") -> dict:
@@ -284,19 +272,31 @@ def _are_rooks_connected(board: chess.Board, color: chess.Color) -> bool:
     return False
 
 
-def _knight_pst_score(board: chess.Board, color: chess.Color) -> float:
+def _safe_knight_outpost(board: chess.Board, color: chess.Color) -> int:
     """
-    Piece-square table score summed over all knights of the given color.
-    Uses _KNIGHT_PST indexed from rank 0 (White's back rank); mirrored
-    vertically for Black so both sides use the same positional incentives.
+    Count knights that are in the opponent's half of the board AND not attacked
+    by any opponent pawn. Safe outpost knights are stable, not immediately
+    dislodgeable — unlike PST-rewarded central knights that are frequently
+    captured at depth=3 self-play, generating spurious negative TD signals.
     """
-    total = 0.0
+    opponent = not color
+
+    opp_pawn_attacks = chess.BB_EMPTY
+    for sq in board.pieces(chess.PAWN, opponent):
+        opp_pawn_attacks |= chess.BB_PAWN_ATTACKS[opponent][sq]
+
+    opp_half = (
+        chess.BB_RANK_5 | chess.BB_RANK_6 | chess.BB_RANK_7 | chess.BB_RANK_8
+        if color == chess.WHITE else
+        chess.BB_RANK_1 | chess.BB_RANK_2 | chess.BB_RANK_3 | chess.BB_RANK_4
+    )
+
+    count = 0
     for sq in board.pieces(chess.KNIGHT, color):
-        rank = chess.square_rank(sq)
-        file = chess.square_file(sq)
-        idx = (rank * 8 + file) if color == chess.WHITE else ((7 - rank) * 8 + file)
-        total += _KNIGHT_PST[idx]
-    return total
+        sq_bb = chess.BB_SQUARES[sq]
+        if (sq_bb & opp_half) and not (sq_bb & opp_pawn_attacks):
+            count += 1
+    return count
 
 
 _WHITE_MINOR_STARTS = frozenset({chess.B1, chess.G1, chess.C1, chess.F1})
@@ -379,7 +379,7 @@ def extract_features(board: chess.Board) -> dict:
       - Penalty features (doubled_pawn, isolated_pawn, backward_pawn) are
         negated so a positive weight always means 'this is good for side to move'.
       - center_control normalized by /4 (raw max = 8 per side).
-      - knight_pst normalized by /2.
+      - knight_outpost normalized by /2 (max 2 knights per side).
       - mobility normalized by /30.
       - king_safety normalized by /3.
       - pawn_advancement normalized by /20.
@@ -417,7 +417,7 @@ def extract_features(board: chess.Board) -> dict:
         "connected_rooks": int(_are_rooks_connected(board, us)) - int(_are_rooks_connected(board, them)),
 
         # Piece coordination & development
-        "knight_pst":     (_knight_pst_score(board, us)  - _knight_pst_score(board, them))  / 2.0,
+        "knight_outpost": (_safe_knight_outpost(board, us) - _safe_knight_outpost(board, them)) / 2.0,
         "bishop_pair":    int(len(board.pieces(chess.BISHOP, us)) >= 2) - int(len(board.pieces(chess.BISHOP, them)) >= 2),
         "rook_seventh":   _count_rooks_seventh(board, us)   - _count_rooks_seventh(board, them),
         "piece_development": _piece_development(board, us)  - _piece_development(board, them),

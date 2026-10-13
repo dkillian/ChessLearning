@@ -29,7 +29,7 @@ games <- tbl(con, "games") |>
 
 # Parameters ----
 
-RUN_ID     <- 18
+RUN_ID     <- 20
 GAME_START <- NULL   # set to integer to restrict to a tranche (NULL = all)
 GAME_END   <- NULL
 
@@ -50,6 +50,8 @@ outcomes <- tbl(con, "games") |>
             TRUE ~ "Draw"
         )
     )
+
+outcomes
 
 # Per-game view
 outcomes |>

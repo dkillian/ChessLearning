@@ -14,6 +14,8 @@ format:
 execute:
   warning: false
   message: false
+params:
+  show_runs: "18,20,21"   # comma-separated run IDs; "all" to show everything
 ---
 
 ```{r global_options, include=F, warning=F, message=F, echo=F, error=F, fig.height=3, fig.width=5}
@@ -38,14 +40,21 @@ DB_PATH <- if (file.exists("../../data/chess_learning.db")) {
 # Feature groupings — 17 features across 4 groups
 MATERIAL_FEATURES    <- c("material_queen", "material_rook", "material_bishop",
                            "material_knight", "material_pawn")
-PAWN_FEATURES        <- c("passed_pawn", "doubled_pawn", "isolated_pawn", "pawn_advancement")
+PAWN_FEATURES        <- c("passed_pawn", "doubled_pawn", "isolated_pawn",
+                           "backward_pawn", "pawn_advancement")
 POSITIONAL_FEATURES  <- c("king_safety", "center_control", "rook_open_file",
                            "connected_rooks", "rook_seventh")
-DEVELOPMENT_FEATURES <- c("bishop_pair", "piece_development", "mobility")
+DEVELOPMENT_FEATURES <- c("knight_pst", "knight_outpost", "bishop_pair",
+                           "piece_development", "mobility")
 
 ALL_GROUPS <- c("Material", "Pawn structure", "Positional", "Coordination & development")
 
 FEATURE_ORDER <- c(MATERIAL_FEATURES, PAWN_FEATURES, POSITIONAL_FEATURES, DEVELOPMENT_FEATURES)
+
+# Runs to include — driven by the `show_runs` Quarto param
+# Render with: quarto::quarto_render("scripts/r/03_visualize.qmd", execute_params = list(show_runs = "18,20,21"))
+SHOW_RUNS <- if (params$show_runs == "all") NULL else
+    as.integer(strsplit(params$show_runs, ",")[[1]])
 
 FEATURE_GROUP <- tibble(
   feature_name = FEATURE_ORDER,
@@ -104,8 +113,18 @@ game_records  <- if (has_game_records)  dbReadTable(con, "game_records")  else N
 weight_deltas <- if (has_weight_deltas) dbReadTable(con, "weight_deltas") else NULL
 dbDisconnect(con)
 
-run_ids <- sort(unique(games$run_id))
-cat("Runs in database:", paste(run_ids, collapse = ", "), "\n")
+all_run_ids <- sort(unique(games$run_id))
+run_ids     <- if (is.null(SHOW_RUNS)) all_run_ids else intersect(SHOW_RUNS, all_run_ids)
+
+# Filter all tables to selected runs
+games         <- games         |> filter(run_id %in% run_ids)
+weights       <- weights       |> filter(run_id %in% run_ids)
+if (!is.null(feature_stats)) feature_stats <- feature_stats |> filter(run_id %in% run_ids)
+if (!is.null(game_records))  game_records  <- game_records  |> filter(run_id %in% run_ids)
+if (!is.null(weight_deltas)) weight_deltas <- weight_deltas |> filter(run_id %in% run_ids)
+
+cat("All runs in DB:", paste(all_run_ids, collapse = ", "), "\n")
+cat("Showing runs: ", paste(run_ids,     collapse = ", "), "\n")
 games |> count(run_id) |> print()
 ```
 

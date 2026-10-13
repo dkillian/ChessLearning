@@ -83,7 +83,7 @@ To start a session:
 
 ---
 
-## Current Architecture (as of Session 15)
+## Current Architecture (as of Session 17)
 
 ### Engine (`scripts/python/engine.py`) — v2
 - **14 learnable positional features** (material features removed entirely)
@@ -95,10 +95,12 @@ To start a session:
 Pawn structure: `passed_pawn`, `doubled_pawn`, `isolated_pawn`, `backward_pawn` (pawn sentry definition), `pawn_advancement`
 King safety: `king_safety` (pawn shelter − attacker count; ÷ 3; phase-scaled × phase)
 Activity: `center_control` (attacks + occupation of d4/d5/e4/e5; ÷ 4), `rook_open_file`, `connected_rooks`
-Coordination: `knight_pst`, `bishop_pair`, `rook_seventh`, `piece_development`, `mobility` (÷ 30; phase-scaled × (0.5+0.5×phase))
+Coordination: `knight_outpost`, `bishop_pair`, `rook_seventh`, `piece_development`, `mobility` (÷ 30; phase-scaled × (0.5+0.5×phase))
 Pawn advancement: `pawn_advancement` (total advancement of **all** pawns from starting rank; ÷ 20; endgame-scaled × (0.5+0.5×end))
 
 **Sign convention (v2 engine):** All 14 features are oriented so that a higher value is better for the side to move. Penalty features (`doubled_pawn`, `isolated_pawn`, `backward_pawn`) are negated in `extract_features()` — stored as (opponent_count − my_count) — so the **correct learned weight is positive for all 14 features**. When assessing sign correctness for v2 runs (18+), any negative weight is wrong. (v1 engine did not negate penalty features; correct signs for v1 runs 1–17 were negative for those three.)
+
+**`knight_outpost` (session 16):** Replaced `knight_pst` in `engine_learnable_material.py` only (`engine.py` unchanged). Counts knights in opponent's half not attacked by any opponent pawn — safe outpost knights. PST approach generated 75.8% wrong-direction TD updates because centralized knights were frequently captured at depth=3.
 
 ### Game Phase Weighting
 `_game_phase(board)` returns midgame fraction [0,1] from weighted piece count / 24 (Q=4, R=2, N/B=1).
@@ -123,13 +125,14 @@ Applied to: `king_safety` (× phase), `mobility` (× (0.5+0.5×phase)), `pawn_ad
 | 13 | 212 | 3 | Softmax selection (τ=0.05, top-10); `selfplay_softmax.ipynb` | 69.4% decisive (regression); 2:1 black-wins asymmetry; pawn_advancement correct sign first time |
 | 14 | 400 | 3 | **14-feature engine**; epsilon-greedy; draw_lr king_safety=0.05 center_control=0.2 | **81.2% decisive; 11/14 correct signs; benchmark 3W/1L/6D vs SF1320 (ELO ~1428)** |
 | 15 | 60+ | 3 | 14-feature engine; softmax τ=0.05 | 70% decisive; 11/14 correct signs; 2.8:1 black asymmetry persists |
-| 16 | 560 | 3 | **Stockfish teacher** (SF ELO=1320); `selfplay_sf.ipynb`; move_limit=80 | ELO 1212→1267→1212 (peaked game 60, regressed by 560); 7/14 correct signs; **experiment abandoned** |
+| 16 | 560 | 3 | **Stockfish teacher** (SF ELO=1320); `selfplay_sf.ipynb`; move_limit=80 | ELO 1212→1267→1212 (peaked game 60, regressed by 560); 7/14 correct signs; not continued since — results were poor but approach not formally closed off |
 | 17 | 5 | 3 | **Human play** (v1 engine); seeded from run_id=14 game 400; all white wins | 11/14 correct signs maintained; same 3 wrong-sign features persist |
 | 18 | 450 | 3 | **v2 engine** (redesigned king_safety, pawn_advancement, backward_pawn); epsilon-greedy from zero | **84.2% decisive; 11/14 correct signs** (wrong: pawn_advancement, knight_pst, doubled_pawn); benchmark game 450: 2W/1L/7D vs SF1320 (~1355 ELO) |
 | 19 | 1 | 3 | **Human play v2**; seeded from run_id=18 game_number=20; engine won (0-1, 102 half-moves) | **11/14 correct signs** (v2 convention; wrong: doubled_pawn, isolated_pawn, connected_rooks); noticeably stronger play reported |
-| 20 | 20+ | 3 | **Learnable material** (`engine_learnable_material.py`); 19 features (5 material + 14 positional); all weights init zero | **85% decisive at game 20; 16/19 correct signs**; all 5 material weights positive; ordering not yet correct (queen last); overnight run in progress |
+| 20 | 510 | 3 | **Learnable material** (`engine_learnable_material.py`); 19 features (5 material + 14 positional); all weights init zero | **76.1% decisive; 16/19 correct signs**; material weights plateaued early (rook > queen persists); benchmark 2W/4L/14D vs SF1320 (~1285 ELO) |
+| 21 | 1050+ | 3 | **`knight_outpost`** replaces `knight_pst`; learnable material; from zero | **17/19 correct signs** at game 1050; material ordering correct (rook > queen > bishop > knight > pawn); benchmark 3W/5L/12D vs SF1320 (~1285 ELO); black asymmetry 1.10:1 (best in learnable-material runs) |
 
-### Current Weight State (run_id=20, game 20 — learnable material, overnight in progress)
+### Current Weight State (run_id=20, game 510 — learnable material, benchmark complete)
 
 **run_id=17 (human play, v1 engine, seeded from run_id=14 game 400, 5 games — v1 sign convention):**
 Correct sign (11/14): passed_pawn (+0.120), mobility (+0.105), center_control (+0.052),
@@ -150,16 +153,30 @@ bishop_pair (+0.003), backward_pawn (+0.005), knight_pst (+0.000), pawn_advancem
 Wrong sign (3/14): doubled_pawn (−0.002), isolated_pawn (−0.003), connected_rooks (−0.001)
 Note: backward_pawn now correctly positive (was misclassified as wrong under v1 convention)
 
-**run_id=20 (learnable material, engine_learnable_material.py, 20 games from zero — v2 sign convention: all positive correct):**
-Correct sign (16/19): material_rook (+0.022), rook_open_file (+0.013), material_pawn (+0.012),
-passed_pawn (+0.012), piece_development (+0.009), mobility (+0.008), center_control (+0.008),
-material_bishop (+0.005), material_knight (+0.005), material_queen (+0.004), rook_seventh (+0.004),
-connected_rooks (+0.003), king_safety (+0.003), pawn_advancement (+0.001), doubled_pawn (+0.0002),
-bishop_pair (+0.00003)
-Wrong sign (3/19): knight_pst (−0.0001), backward_pawn (−0.001), isolated_pawn (−0.005)
-Note: material ordering not yet correct at game 20 (rook > pawn > bishop ≈ knight > queen);
-expected to converge toward queen > rook > bishop ≈ knight > pawn with more games.
-Overnight run in progress.
+**run_id=20 (learnable material, engine_learnable_material.py, 510 games from zero — v2 sign convention: all positive correct):**
+Correct sign (16/19): material_rook (+0.186), material_queen (+0.116), mobility (+0.074),
+material_bishop (+0.074), passed_pawn (+0.049), material_pawn (+0.048), center_control (+0.043),
+rook_seventh (+0.041), material_knight (+0.039), rook_open_file (+0.028), connected_rooks (+0.019),
+piece_development (+0.013), king_safety (+0.010), isolated_pawn (+0.007), backward_pawn (+0.004),
+bishop_pair (+0.004)
+Wrong sign (3/19): doubled_pawn (−0.003), pawn_advancement (−0.011), knight_pst (−0.012)
+Note: material weights plateaued early; rook (0.186) still exceeds queen (0.116) at game 510.
+Benchmark: 2W/4L/14D vs SF1320 — estimated ELO ~1285 (~70 pts below hardcoded-material baseline).
+`knight_pst` replaced by `knight_outpost` in engine_learnable_material.py; run_id=21 started from zero.
+
+**run_id=21 (learnable material, knight_outpost replaces knight_pst, 1050 games from zero — v2 sign convention: all positive correct):**
+Correct sign (17/19): material_rook (+0.213), material_queen (+0.184), material_bishop (+0.112),
+mobility (+0.074), material_knight (+0.060), center_control (+0.052), material_pawn (+0.045),
+rook_seventh (+0.037), king_safety (+0.029), knight_outpost (+0.025), passed_pawn (+0.024),
+connected_rooks (+0.010), piece_development (+0.008), isolated_pawn (+0.005), backward_pawn (+0.005),
+rook_open_file (+0.002), bishop_pair (+0.001)
+Wrong sign (2/19): doubled_pawn (−0.007), pawn_advancement (−0.031)
+Note: material ordering fully correct (rook > queen > bishop > knight > pawn); knight_outpost
+solidly positive throughout; pawn_advancement crossed zero at game 200 as in run_id=20 (structural
+credit assignment issue); doubled_pawn volatile random-walk. Black asymmetry 1.10:1 — best in any
+learnable-material run.
+Benchmark: 3W/5L/12D vs SF1320 — estimated ELO ~1285 (60% games hit 80 half-move cap; next
+benchmark will use no move limit — chess rules only via claim_draw=True).
 
 ### Stockfish Integration
 - **Stockfish 19** installed via `winget install Stockfish.Stockfish`
@@ -171,6 +188,8 @@ Overnight run in progress.
 - `stockfish_games` DB table logs individual game PGNs (created by `05_stockfish_benchmark.R`)
 - **Session 12 benchmark (run_id=14, 400 games): 3W/1L/6D at ELO 1320 — estimated ELO ~1390**
 - **Session 15 benchmark (run_id=18, 450 games): 2W/1L/7D at ELO 1320 — estimated ELO ~1355**
+- **Session 16 benchmark (run_id=20, 510 games): 2W/4L/14D at ELO 1320 — estimated ELO ~1285** (learnable material; wrong engine import bug fixed before re-run)
+- **Session 17 benchmark (run_id=21, 1040 games): 3W/5L/12D at ELO 1320 — estimated ELO ~1285** (learnable material + knight_outpost; 60% move-limit draws; next benchmark will use no move limit)
 - `stockfish_evals` also receives ELO estimates from `selfplay_sf.ipynb` (source = `'sf_teacher'`)
 - Windows asyncio fix required in Jupyter: `asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())` before `popen_uci()`
 
@@ -182,11 +201,11 @@ Overnight run in progress.
 |------|---------|
 | `scripts/python/engine.py` | Importable module: 14-feature positional extractor (v2), linear evaluator with hard-coded material, negamax search with alpha-beta, `_game_phase()` helper |
 | `scripts/python/engine_hardcoded_material.py` | Archive of hardcoded-material engine condition (runs 1–19): 14 positional features, material hard-coded |
-| `scripts/python/engine_learnable_material.py` | Learnable-material engine condition (run 20+): 19 features — 5 material + 14 positional; no hard-coded piece values |
+| `scripts/python/engine_learnable_material.py` | Learnable-material engine condition (run 20+): 19 features — 5 material + 14 positional; no hard-coded piece values. **Session 16:** `knight_pst` replaced by `knight_outpost` (`_safe_knight_outpost()` — knights in opponent's half not attacked by opponent pawns) |
 | `scripts/python/selfplay_td0.ipynb` | TD(0) self-play training; epsilon-greedy; v2 engine; current runs: 18 |
 | `scripts/python/selfplay_learnable_material.ipynb` | TD(0) self-play training; learnable material condition; imports `engine_learnable_material`; current runs: 20 |
 | `scripts/python/selfplay_softmax.ipynb` | TD(0) self-play; softmax move selection (τ=0.05, top-10); current runs: 15 |
-| `scripts/python/selfplay_sf.ipynb` | **Stockfish teacher** (abandoned after run_id=16): plays vs Stockfish at configurable ELO; retained for reference |
+| `scripts/python/selfplay_sf.ipynb` | **Stockfish teacher** (run_id=16): plays vs Stockfish at configurable ELO; run_id=16 showed ELO regression and only 7/14 correct signs — not continued since, but not closed off as a future approach |
 | `scripts/python/selfplay_td0_v1_runs1-14.ipynb` | Archived v1 TD(0) notebook (runs 1–14) |
 | `scripts/python/selfplay_softmax_v1_run15.ipynb` | Archived v1 softmax notebook (run 15) |
 | `scripts/python/selfplay_sf_v1_run16.ipynb` | Archived v1 Stockfish-teacher notebook (run 16) |
@@ -201,7 +220,7 @@ Overnight run in progress.
 | `scripts/r/td_tutorial.qmd` | Tutorial: TD(0) learning via Scholar's Mate walkthrough |
 | `scripts/r/negamax_tutorial.qmd` | Tutorial: negamax search with alpha-beta pruning; worked example using live weights |
 | `scripts/r/05_move_scorer.R` | Parameterized script — score all legal moves from any FEN at configurable depth/run |
-| `scripts/r/05_stockfish_benchmark.R` | Parameterized script — run ELO benchmark vs Stockfish; designed to run as a background job so the console stays free |
+| `scripts/r/05_stockfish_benchmark.R` | Parameterized script — run ELO benchmark vs Stockfish; designed to run as a background job so the console stays free. Config includes `ENGINE_MODULE` parameter (`"engine"` for runs 1–19, `"engine_learnable_material"` for run 20+). **Session 17:** 80 half-move limit removed — games now play to natural conclusion under chess rules only (`claim_draw=TRUE`) |
 | `scripts/r/05_search_explorer.R` | Shiny app — interactive move scorer; navigate positions, compare move rankings by depth |
 | `scripts/r/06_search_mechanics.R` | Step-by-step walkthrough: board evaluation feature-by-feature, negamax depth-by-depth |
 | `scripts/r/06_stockfish_arena.R` | Shiny app — Live Game (engine vs Stockfish) and ELO Benchmark read-only viewer (polls DB every 30s); run benchmarks via `05_stockfish_benchmark.R` |

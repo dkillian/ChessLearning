@@ -25,7 +25,11 @@ Minor changes within a run (e.g., tranche size, LR adjustment) continue the same
 | 14 | 2026-10-07 | 400 | 3 | 0.001 | 200 | zero | 0.1 | **14-feature engine**; epsilon-greedy; draw_lr king_safety=0.05 center_control=0.2; 81.2% decisive; 11/14 correct signs; benchmark 3W/1L/6D vs SF1320 (ELO ~1428) |
 | 15 | 2026-10-08 | 60+ | 3 | 0.001 | 200 | zero | softmax τ=0.05 | Softmax + 14-feature; 70% decisive; 11/14 correct signs at 60 games; 2.8:1 black asymmetry persists |
 | 16 | 2026-10-08 | 560 | 3 | 0.001 | 80 | zero | N/A (SF moves) | **Stockfish teacher** (SF ELO=1320); `selfplay_sf.ipynb`; ELO 1212→1267→1212 (peaked game 60, regressed to baseline by game 560); 7/14 correct signs at 560 games; experiment abandoned |
-| 17 | 2026-10-09 | 1 | 3 | 0.001 | — | seeded run_id=14 game_400 | N/A (human) | **Human play** via `07_human_play.R`; TD(0) updates from human games; 1 game played; TD error 0.0542 (77th pct of run_id=14); 11/14 correct signs maintained |
+| 17 | 2026-10-09 | 5 | 3 | 0.001 | — | seeded run_id=14 game_400 | N/A (human) | **Human play v1** via `07_human_play.R`; 5 games played (all 1-0); 11/14 correct signs maintained |
+| 18 | 2026-10-10 | 450 | 3 | 0.001 | 200 | zero | 0.1 | **v2 engine from zero**; epsilon-greedy; 84.2% decisive; 11/14 correct signs (v2 convention); benchmark 2W/1L/7D vs SF1320 (~1355 ELO) |
+| 19 | 2026-10-10 | 1 | 3 | 0.001 | 200 | seeded run_id=18 game_20 | N/A (human) | **v2 human play**; engine won (0-1, 102 half-moves); 11/14 correct signs (v2 convention) |
+| 20 | 2026-10-11 | 510 | 3 | 0.001 | 200 | zero | 0.1 | **Learnable material** (`engine_learnable_material.py`); 19 features; 76.1% decisive; 16/19 correct signs; rook > queen plateau; benchmark 2W/4L/14D (~1285 ELO) |
+| 21 | 2026-10-12 | 1050+ | 3 | 0.001 | 200 | zero | 0.1 | **`knight_outpost`** replaces `knight_pst`; learnable material; from zero; 17/19 correct signs at game 1050; ELO ~1285; best black asymmetry (1.10:1) in learnable-material runs |
 
 ---
 
@@ -1069,3 +1073,126 @@ Deleted 14 duplicate weight rows from DB for run_id=19 game_number=1.
 3. **Diagnose the 3 persistently wrong-sign features** — `doubled_pawn`, `pawn_advancement`, `knight_pst` (delta distribution, trajectory, feature-outcome correlation)
 4. **If run_id=20 is viable** — add engine condition menu to `07_human_play.R` so the human player can choose which engine configuration to play against
 5. **Update `engine.ipynb`** to v2 architecture
+
+---
+
+## Session 16 — October 12, 2026
+
+### What We Worked On
+
+- Assessed run_id=20 overnight results (510 games, learnable material)
+- Fixed Stockfish benchmark script (`05_stockfish_benchmark.R`): wrong engine import bug; added `ENGINE_MODULE` config parameter
+- Re-ran Stockfish benchmark for run_id=20 (20 games at ELO 1320)
+- Performed wrong-sign feature diagnostics on run_id=20: trajectory plots, outcome-correlated feature distributions, weight delta distributions
+- Replaced `knight_pst` with `knight_outpost` in `engine_learnable_material.py`
+- Launched run_id=21 (learnable material, `knight_outpost`, from zero; first 50-game tranche running at session close)
+
+### Key Findings
+
+**run_id=20 at 510 games:**
+- 76.1% decisive (0-1: 42.9%, 1-0: 33.1%, draws: 23.9%); 1.3:1 black asymmetry
+- 16/19 correct signs (wrong: `doubled_pawn`, `pawn_advancement`, `knight_pst`)
+- Material weights plateaued early — rook (0.186) still exceeds queen (0.116) at game 510, barely moved since game 20
+- 14 draws at ELO 1320 is expected given unconverged material
+
+**Stockfish benchmark (run_id=20, game 510, 20 games at ELO 1320):**
+- 2W / 4L / 14D; score 0.45; estimated ELO ~1285
+- 70% of games hit the 80 half-move cap
+- ~70 ELO points below the hardcoded-material baseline (run_id=18, ~1355)
+- Note: initial benchmark attempt was invalid — `05_stockfish_benchmark.R` imported `engine.py` (hardcoded material) instead of `engine_learnable_material.py`; material weights were being ignored entirely. Fixed by adding `ENGINE_MODULE` config parameter. 13 invalid benchmark rows deleted and re-run with correct engine.
+
+**Consistent ELO comparison (all using same formula):**
+
+| run_id | Games | W/L/D | Score | ELO est. |
+|--------|-------|-------|-------|----------|
+| 14 | 10 | 3/1/6 | 0.60 | ~1390 |
+| 18 | 10 | 2/1/7 | 0.55 | ~1355 |
+| 20 | 20 | 2/4/14 | 0.45 | ~1285 |
+
+**Wrong-sign feature diagnostics (three distinct failure modes):**
+
+| Feature | Failure mode | Detail |
+|---------|-------------|--------|
+| `doubled_pawn` | Magnitude asymmetry | 54% positive updates (right direction!) but fat negative tail overwhelms; near-random walk |
+| `pawn_advancement` | Frequency bias (moderate) | 61% negative, equal magnitudes; credit assignment — advanced pawns lead to exchanges engine mis-evaluates |
+| `knight_pst` | Frequency bias (severe) | 75.8% negative, equal magnitudes; PST rewards centralized knights that get captured at depth=3 |
+
+**Feature redesign: `knight_pst` → `knight_outpost`:**
+- New definition: knights in opponent's half not attacked by any opponent pawn (stable outpost knights)
+- Implemented as `_safe_knight_outpost()` in `engine_learnable_material.py`
+- `_KNIGHT_PST` table and `_knight_pst_score()` removed
+- `engine.py` (hardcoded material baseline) left unchanged
+- Fixed `AttributeError: module 'chess' has no attribute 'BB_RANK_0'` — python-chess uses 1-indexed rank constants (`BB_RANK_1` through `BB_RANK_8`)
+
+### Scripts Changed
+
+| File | Change |
+|------|--------|
+| `scripts/python/engine_learnable_material.py` | `knight_pst` → `knight_outpost`; `_safe_knight_outpost()` replaces `_knight_pst_score()` and `_KNIGHT_PST` |
+| `scripts/r/05_stockfish_benchmark.R` | Added `ENGINE_MODULE` config parameter (default `"engine_learnable_material"`); replaced hardcoded `"engine"` import |
+
+### Steps for Next Session
+
+1. **Assess run_id=21 at 50 games** — check sign correctness, especially `knight_outpost`; compare decisive rate to run_id=20
+2. **Launch overnight tranche** — run_id=21, 500+ games
+3. **Architecture decision** — after ~500 games of run_id=21, decide: continue learnable material exploration or return to hardcoded material baseline for the 30-run experimental design
+4. **Update `ChessLearningWorkPlan.md`** — plan is stale relative to current learnable material phase
+
+---
+
+## Session 17 — October 13, 2026
+
+### What We Worked On
+
+- Assessed run_id=21 overnight results (1033 games then 1050 after final tranche)
+- Ran Stockfish benchmark for run_id=21 (20 games at ELO 1320)
+- Removed 80 half-move limit from `05_stockfish_benchmark.R` — games now play to natural conclusion under chess rules only
+- Discussed neural net engine implementation plan (Phase 1: MLP with same 19 features, PyTorch)
+- Corrected AGENTS.md: Stockfish teacher approach not "abandoned" — just not continued since run_id=16
+- Discussed cross-run co-learning and K+R vs K endgame failure (hardcoded heuristic recommended)
+- Session-end git commit and push
+
+### Key Findings
+
+**run_id=21 at 1033 games (overnight assessment):**
+- Material ordering dramatically improved: rook (0.213) > queen (0.184) > bishop (0.109) > knight (0.058) > pawn (0.043) — best in any learnable-material run
+- `knight_outpost` (+0.024) still positive and growing — redesign confirmed working
+- BUT: 15/19 correct signs — `bishop_pair` and `isolated_pawn` temporarily wrong; `rook_open_file` and `piece_development` fading; `pawn_advancement` at −0.031
+
+**run_id=21 at 1050 games (final tranche):**
+- 17/19 correct signs — `bishop_pair` and `isolated_pawn` self-corrected
+- Wrong: `doubled_pawn` (−0.007, volatile random-walk), `pawn_advancement` (−0.031, structural)
+- Black asymmetry 1.10:1 — best in any learnable-material run
+- Decisive rate: 74.4%
+
+**Stockfish benchmark (run_id=21, game 1040, 20 games at ELO 1320):**
+- 3W / 5L / 12D; score 0.45; estimated ELO ~1285
+- 12/20 games (60%) hit 80 half-move cap — benchmark still distorted by move limit
+- Same ELO as run_id=20 (510 games) despite better weights and sign count
+- Note: 80 half-move limit removed from benchmark script — next run will use chess rules only
+
+**ELO comparison (consistent formula):**
+
+| run_id | Games | W/L/D | Score | ELO est. |
+|--------|-------|-------|-------|----------|
+| 14 | 10 | 3/1/6 | 0.60 | ~1390 |
+| 18 | 10 | 2/1/7 | 0.55 | ~1355 |
+| 20 | 20 | 2/4/14 | 0.45 | ~1285 |
+| 21 | 20 | 3/5/12 | 0.45 | ~1285 |
+
+### Scripts Changed
+
+| File | Change |
+|------|--------|
+| `scripts/r/05_stockfish_benchmark.R` | Removed `move_limit = 80L` — games now play to natural conclusion |
+| `scripts/r/07_human_play.R` | Session 16 carry-over: engine/run/checkpoint selection menu; claim_draw fix; ENGINE_MODULE config |
+| `scripts/python/selfplay_td0.ipynb` | Session 16 carry-over: claim_draw=True fix |
+| `scripts/python/selfplay_learnable_material.ipynb` | Session 16 carry-over: claim_draw=True fix |
+| `scripts/r/03_visualize.qmd` | Session 16 carry-over: SHOW_RUNS Quarto param; backward_pawn + knight_pst/outpost added |
+
+### Steps for Next Session
+
+1. **Implement neural net engine (Phase 1)** — MLP with same 19 features; PyTorch 2.8.0 confirmed available; Adam optimizer; save weights as `.pt` files to `models/`; drop-in replacement for `evaluate()` in negamax search; new training notebook `selfplay_nn.ipynb`
+2. **Run first 50-game tranche on neural net** — verify training loop, check feature attributions
+3. **Re-run Stockfish benchmark on run_id=21** — now without move limit for cleaner ELO estimate
+4. **Continue run_id=21 overnight** — target 2000+ total games before architecture decision

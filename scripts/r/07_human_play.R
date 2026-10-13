@@ -19,22 +19,34 @@ library(reticulate)
 
 # ---- Python modules ----
 
-# Clear cached engine module so the app always loads the latest engine.py from disk
-py_run_string("import sys; sys.modules.pop('engine', None)")
+# ---- Configuration ----
 
-chess_mod  <- import("chess")
-chess_svg  <- import("chess.svg")
-engine_mod <- import_from_path("engine",
-    path = if (file.exists("../python/engine.py")) "../python" else "scripts/python")
+ENGINE_PATH      <- if (file.exists("../python/engine.py")) "../python" else "scripts/python"
+DEFAULT_SEED_RUN <- 18L   # fallback seed run shown in selector on first launch
+
+# ---- Python modules ----
+
+# Clear both cached engine modules so the app always loads latest from disk
+py_run_string("import sys; [sys.modules.pop(m, None) for m in ['engine', 'engine_learnable_material']]")
+
+chess_mod <- import("chess")
+chess_svg <- import("chess.svg")
+
+ENGINES <- list(
+    engine                    = import_from_path("engine", path = ENGINE_PATH),
+    engine_learnable_material = tryCatch(
+        import_from_path("engine_learnable_material", path = ENGINE_PATH),
+        error = function(e) NULL
+    )
+)
 
 # ---- Paths ----
 
-DB_PATH     <- if (file.exists("../../data/chess_learning.db")) {
+DB_PATH <- if (file.exists("../../data/chess_learning.db")) {
     "../../data/chess_learning.db"
 } else {
     "data/chess_learning.db"
 }
-SEED_RUN_ID <- 18L  # v2 self-play run to seed from if no v2 human-play run exists yet
 
 # ---- Helpers ----
 
@@ -43,6 +55,32 @@ SEED_RUN_ID <- 18L  # v2 self-play run to seed from if no v2 human-play run exis
 get_run_ids <- function() {
     con <- dbConnect(SQLite(), DB_PATH)
     ids <- dbGetQuery(con, "SELECT DISTINCT run_id FROM weights ORDER BY run_id DESC")$run_id
+    dbDisconnect(con)
+    ids
+}
+
+# Returns run_ids appropriate for the given engine type, excluding human-play runs
+get_runs_for_engine <- function(engine_type) {
+    con <- dbConnect(SQLite(), DB_PATH)
+    if (engine_type == "engine_learnable_material") {
+        ids <- dbGetQuery(con,
+            "SELECT DISTINCT w.run_id FROM weights w
+             WHERE w.feature_name = 'material_queen'
+               AND w.run_id NOT IN (
+                   SELECT run_id FROM runs WHERE notes LIKE 'Human play%'
+               )
+             ORDER BY w.run_id DESC")$run_id
+    } else {
+        ids <- dbGetQuery(con,
+            "SELECT DISTINCT w.run_id FROM weights w
+             WHERE w.run_id NOT IN (
+                 SELECT DISTINCT run_id FROM weights WHERE feature_name = 'material_queen'
+             )
+               AND w.run_id NOT IN (
+                   SELECT run_id FROM runs WHERE notes LIKE 'Human play%'
+               )
+             ORDER BY w.run_id DESC")$run_id
+    }
     dbDisconnect(con)
     ids
 }
@@ -291,6 +329,18 @@ ui <- page_sidebar(
         width = 280,
 
         card(
+            card_header("Engine"),
+            selectInput("ui_engine", "Engine type",
+                choices = c(
+                    "Hardcoded material" = "engine",
+                    "Learnable material" = "engine_learnable_material"
+                ),
+                selected = "engine"),
+            selectInput("ui_seed_run",    "Seed run",   choices = NULL),
+            selectInput("ui_checkpoint",  "Checkpoint", choices = NULL)
+        ),
+
+        card(
             card_header("Game"),
             uiOutput("session_info"),
             radioButtons("human_color", "I play as",
@@ -348,37 +398,57 @@ ui <- page_sidebar(
 
 server <- function(input, output, session) {
 
-    # ── Session state — auto-initialized on startup ────────────────────────
+    # ── Session state ──────────────────────────────────────────────────────
 
+    session_run_id  <- reactiveVal(NULL)
+    session_weights <- reactiveVal(NULL)
+    game_number_rv  <- reactiveVal(0L)
+    src_td_errors   <- reactiveVal(numeric(0))
+    source_run_info <- reactiveVal(list(run_id = NULL, checkpoint = NULL))
+    active_engine_mod <- reactiveVal(ENGINES[["engine"]])  # locked in on New Game
+
+    # Pre-populate selectors on startup using auto-detected active run as hint
     .active_run <- get_active_human_run()
-    if (!is.null(.active_run)) {
-        .latest_ckpt <- get_checkpoints(.active_run)[1]
-        .wv          <- load_weights_vec(.active_run, .latest_ckpt)
-        .current_gn  <- get_latest_game_number(.active_run)
-        .src_id      <- parse_source_run_id(.active_run)
-    } else {
-        .gn         <- get_checkpoints(SEED_RUN_ID)[1]
-        .wv         <- load_weights_vec(SEED_RUN_ID, .gn)
-        .active_run <- create_new_run(SEED_RUN_ID, .gn, .wv)
-        .current_gn <- 0L
-        .src_id     <- SEED_RUN_ID
-    }
-    .con    <- dbConnect(SQLite(), DB_PATH)
-    .errors <- dbGetQuery(.con, sprintf(
-        "SELECT td_error FROM game_records WHERE run_id=%d AND td_error IS NOT NULL",
-        as.integer(.src_id)))$td_error
-    dbDisconnect(.con)
+    .hint_src   <- if (!is.null(.active_run)) parse_source_run_id(.active_run) else DEFAULT_SEED_RUN
+    .hint_eng   <- "engine"   # default; hardcoded material runs are the v2 baseline
 
-    session_run_id  <- reactiveVal(.active_run)
-    session_weights <- reactiveVal(.wv)
-    game_number_rv  <- reactiveVal(.current_gn)
-    src_td_errors   <- reactiveVal(.errors)
-    source_run_info <- reactiveVal(list(run_id = .src_id,
-                                        checkpoint = get_checkpoints(.active_run)[1]))
+    .init_runs <- get_runs_for_engine(.hint_eng)
+    .init_cpts <- if (.hint_src %in% .init_runs) get_checkpoints(.hint_src) else
+                  if (length(.init_runs) > 0) get_checkpoints(.init_runs[1]) else integer(0)
+    .init_run_sel <- if (.hint_src %in% .init_runs) .hint_src else
+                     if (length(.init_runs) > 0) .init_runs[1] else NULL
+
+    updateSelectInput(session, "ui_seed_run",
+        choices  = setNames(.init_runs, paste("Run", .init_runs)),
+        selected = .init_run_sel)
+    updateSelectInput(session, "ui_checkpoint",
+        choices  = setNames(.init_cpts, paste("Game", .init_cpts)),
+        selected = .init_cpts[1])
+
+    # ── Selector reactives ─────────────────────────────────────────────────
+
+    # Update seed run list when engine type changes
+    observeEvent(input$ui_engine, {
+        runs <- get_runs_for_engine(input$ui_engine)
+        updateSelectInput(session, "ui_seed_run",
+            choices  = setNames(runs, paste("Run", runs)),
+            selected = runs[1])
+    }, ignoreInit = TRUE)
+
+    # Update checkpoint list when seed run changes
+    observeEvent(input$ui_seed_run, {
+        req(input$ui_seed_run)
+        cpts <- get_checkpoints(as.integer(input$ui_seed_run))
+        updateSelectInput(session, "ui_checkpoint",
+            choices  = setNames(cpts, paste("Game", cpts)),
+            selected = cpts[1])
+    }, ignoreInit = TRUE)
 
     output$session_info <- renderUI({
+        rid <- session_run_id()
         tags$small(style = "color:#888; display:block; margin-bottom:8px;",
-            paste0("Run ", session_run_id(), " \u00b7 ", game_number_rv(), " games played"))
+            if (is.null(rid)) "No session — click New Game to start"
+            else paste0("Run ", rid, " \u00b7 ", game_number_rv(), " games played"))
     })
 
     # ── Game state ─────────────────────────────────────────────────────────
@@ -428,7 +498,41 @@ server <- function(input, output, session) {
     # ── New game ──────────────────────────────────────────────────────────
 
     observeEvent(input$btn_new_game, {
-        req(!is.null(session_run_id()))
+        req(input$ui_seed_run, input$ui_checkpoint)
+
+        # If this is the first game or a config change, initialise/find the run
+        seed_run <- as.integer(input$ui_seed_run)
+        seed_ckpt <- as.integer(input$ui_checkpoint)
+        eng_key   <- input$ui_engine
+
+        if (is.null(session_run_id())) {
+            # Check for an existing human-play run seeded from this config
+            .existing <- get_active_human_run()
+            if (!is.null(.existing) && parse_source_run_id(.existing) == seed_run) {
+                .latest  <- get_checkpoints(.existing)[1]
+                .wv      <- load_weights_vec(.existing, .latest)
+                .gn      <- get_latest_game_number(.existing)
+                .src_id  <- seed_run
+                session_run_id(.existing)
+            } else {
+                .wv      <- load_weights_vec(seed_run, seed_ckpt)
+                .new_run <- create_new_run(seed_run, seed_ckpt, .wv)
+                .gn      <- 0L
+                .src_id  <- seed_run
+                session_run_id(.new_run)
+            }
+            session_weights(.wv)
+            game_number_rv(.gn)
+            source_run_info(list(run_id = .src_id, checkpoint = seed_ckpt))
+            .con    <- dbConnect(SQLite(), DB_PATH)
+            .errors <- dbGetQuery(.con, sprintf(
+                "SELECT td_error FROM game_records WHERE run_id=%d AND td_error IS NOT NULL",
+                as.integer(.src_id)))$td_error
+            dbDisconnect(.con)
+            src_td_errors(.errors)
+            active_engine_mod(ENGINES[[eng_key]])
+        }
+
         col <- if (input$human_color == "White") chess_mod$WHITE else chess_mod$BLACK
         human_color(col)
         move_history(character(0))
@@ -456,7 +560,7 @@ server <- function(input, output, session) {
     # ── Position & eval recording ──────────────────────────────────────────
 
     record_position <- function(board) {
-        feats_py <- engine_mod$extract_features(board)
+        feats_py <- active_engine_mod()$extract_features(board)
         feat_vec <- setNames(as.numeric(unlist(feats_py)), names(feats_py))
         positions_rv(c(positions_rv(), list(list(
             features = feat_vec,
@@ -467,7 +571,7 @@ server <- function(input, output, session) {
 
     update_eval_history <- function(board_after) {
         wp <- as.list(session_weights())
-        s  <- as.numeric(engine_mod$evaluate(board_after, wp))
+        s  <- as.numeric(active_engine_mod()$evaluate(board_after, wp))
         white_eval <- if (board_after$turn == chess_mod$WHITE) s else -s
         eval_history(c(eval_history(), white_eval))
     }
@@ -492,8 +596,8 @@ server <- function(input, output, session) {
         last_move_rv(mv)
         update_eval_history(current_board())
 
-        if (current_board()$is_game_over()) {
-            end_game(current_board()$result())
+        if (current_board()$is_game_over(claim_draw = TRUE)) {
+            end_game(current_board()$result(claim_draw = TRUE))
         } else {
             play_engine_move()
         }
@@ -522,7 +626,7 @@ server <- function(input, output, session) {
         record_position(b)
 
         tryCatch({
-            mv  <- engine_mod$get_best_move(b, wp, as.integer(input$depth), FALSE)[[1]]
+            mv  <- active_engine_mod()$get_best_move(b, wp, as.integer(input$depth), FALSE)[[1]]
             req(!is.null(mv))
             san <- b$san(mv)
             move_history(c(move_history(), mv$uci()))
@@ -530,8 +634,8 @@ server <- function(input, output, session) {
             last_move_rv(mv)
             update_eval_history(current_board())
 
-            if (current_board()$is_game_over()) {
-                end_game(current_board()$result())
+            if (current_board()$is_game_over(claim_draw = TRUE)) {
+                end_game(current_board()$result(claim_draw = TRUE))
             } else {
                 send_board_update(is_human_turn = TRUE)
             }
@@ -665,7 +769,7 @@ server <- function(input, output, session) {
     output$feature_table <- renderTable({
         req(game_active())
         wp       <- session_weights()
-        feats_py <- engine_mod$extract_features(current_board())
+        feats_py <- active_engine_mod()$extract_features(current_board())
         feat_vec <- setNames(as.numeric(unlist(feats_py)), names(feats_py))
         tibble(
             Feature      = names(feat_vec),
