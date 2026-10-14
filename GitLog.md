@@ -121,5 +121,6 @@ Succeeded. Remote is now clean.
 | `ce5e426` | 2026-10-07 | Session 10: softmax notebook, Stockfish integration, game viewer analysis panel, 6 new R scripts (post-filter-branch SHA) |
 | TBD | 2026-10-07 | Session 11: engine.py 14 features, softmax bug fixes, doc update, run_id=14 config |
 | `b3d9470` | earlier | Initial commit |
+| TBD | 2026-10-13 | Session 18: neural net engine condition, NN human play support, ELO viz, public app multi-condition deployment |
 
 *(Intermediate "d" commits were rewritten by filter-branch and their SHAs changed.)*

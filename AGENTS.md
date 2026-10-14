@@ -83,7 +83,7 @@ To start a session:
 
 ---
 
-## Current Architecture (as of Session 17)
+## Current Architecture (as of Session 18)
 
 ### Engine (`scripts/python/engine.py`) — v2
 - **14 learnable positional features** (material features removed entirely)
@@ -131,8 +131,13 @@ Applied to: `king_safety` (× phase), `mobility` (× (0.5+0.5×phase)), `pawn_ad
 | 19 | 1 | 3 | **Human play v2**; seeded from run_id=18 game_number=20; engine won (0-1, 102 half-moves) | **11/14 correct signs** (v2 convention; wrong: doubled_pawn, isolated_pawn, connected_rooks); noticeably stronger play reported |
 | 20 | 510 | 3 | **Learnable material** (`engine_learnable_material.py`); 19 features (5 material + 14 positional); all weights init zero | **76.1% decisive; 16/19 correct signs**; material weights plateaued early (rook > queen persists); benchmark 2W/4L/14D vs SF1320 (~1285 ELO) |
 | 21 | 1050+ | 3 | **`knight_outpost`** replaces `knight_pst`; learnable material; from zero | **17/19 correct signs** at game 1050; material ordering correct (rook > queen > bishop > knight > pawn); benchmark 3W/5L/12D vs SF1320 (~1285 ELO); black asymmetry 1.10:1 (best in learnable-material runs) |
+| 22 | 3 | 3 | Human play; seeded run_id=21 game_200; learnable material | — |
+| 23 | ? | 3 | Human play; seeded run_id=21 game_240; learnable material | — |
+| 24 | 100+ (overnight) | 3 | **Neural net** (MLP 19→32→1); TD(0)+Adam; `selfplay_nn.ipynb`; from zero | **13/19 correct signs at game 100; pawn_advancement +0.120 (positive — never achieved in linear); queen > rook material ordering corrected by game 100; 70% decisive (games 51–100)** |
+| 25 | 1 | 3 | Human play (accidental); seeded from NN run_id=24 game_0 attribution weights; linear TD update (old code) | Near-zero-initialized linear run; not meaningful |
+| 26 | 2+ | 3 | **NN human play** (new NN-aware code); seeded from run_id=24 game_10 | Genuine PyTorch TD updates; ~3× larger parameter updates per halfmove than self-play |
 
-### Current Weight State (run_id=20, game 510 — learnable material, benchmark complete)
+### Current Weight State (run_id=24, game 100 — neural net, overnight run in progress)
 
 **run_id=17 (human play, v1 engine, seeded from run_id=14 game 400, 5 games — v1 sign convention):**
 Correct sign (11/14): passed_pawn (+0.120), mobility (+0.105), center_control (+0.052),
@@ -163,6 +168,11 @@ Wrong sign (3/19): doubled_pawn (−0.003), pawn_advancement (−0.011), knight_
 Note: material weights plateaued early; rook (0.186) still exceeds queen (0.116) at game 510.
 Benchmark: 2W/4L/14D vs SF1320 — estimated ELO ~1285 (~70 pts below hardcoded-material baseline).
 `knight_pst` replaced by `knight_outpost` in engine_learnable_material.py; run_id=21 started from zero.
+
+**run_id=24 (neural net MLP 19→32→1, TD(0)+Adam, 100 games from zero — v2 sign convention: all positive correct; attribution weights = dV/dx_i at starting position):**
+Correct sign (13/19): material_queen (+0.401), mobility (+0.264), material_rook (+0.261), material_bishop (+0.177), pawn_advancement (+0.120), piece_development (+0.108), material_knight (+0.093), rook_seventh (+0.075), material_pawn (+0.048), passed_pawn (+0.044), isolated_pawn (+0.026), knight_outpost (+0.024), center_control (+0.010)
+Wrong sign (6/19): bishop_pair (−0.121), backward_pawn (−0.073), connected_rooks (−0.047), doubled_pawn (−0.028), king_safety (−0.020), rook_open_file (−0.007)
+Note: pawn_advancement correctly positive (never achieved in any linear run); material ordering queen > rook corrected by game 100 (linear learnable material never achieved this at 1050 games). Overnight run in progress targeting game 500.
 
 **run_id=21 (learnable material, knight_outpost replaces knight_pst, 1050 games from zero — v2 sign convention: all positive correct):**
 Correct sign (17/19): material_rook (+0.213), material_queen (+0.184), material_bishop (+0.112),
@@ -220,11 +230,12 @@ benchmark will use no move limit — chess rules only via claim_draw=True).
 | `scripts/r/td_tutorial.qmd` | Tutorial: TD(0) learning via Scholar's Mate walkthrough |
 | `scripts/r/negamax_tutorial.qmd` | Tutorial: negamax search with alpha-beta pruning; worked example using live weights |
 | `scripts/r/05_move_scorer.R` | Parameterized script — score all legal moves from any FEN at configurable depth/run |
-| `scripts/r/05_stockfish_benchmark.R` | Parameterized script — run ELO benchmark vs Stockfish; designed to run as a background job so the console stays free. Config includes `ENGINE_MODULE` parameter (`"engine"` for runs 1–19, `"engine_learnable_material"` for run 20+). **Session 17:** 80 half-move limit removed — games now play to natural conclusion under chess rules only (`claim_draw=TRUE`) |
+| `scripts/r/05_stockfish_benchmark.R` | Parameterized script — run ELO benchmark vs Stockfish; designed to run as a background job so the console stays free. Config includes `ENGINE_MODULE` parameter (`"engine"` for runs 1–19, `"engine_learnable_material"` for run 20+, `"engine_nn"` for run 24+). **Session 17:** 80 half-move limit removed — games now play to natural conclusion under chess rules only (`claim_draw=TRUE`) |
+| `scripts/r/seed_supabase.R` | **New (Session 18)** — one-time seeding script: creates `nn_models` table in Supabase; seeds run_id=2 (learnable material from local run_id=21) and run_id=3 (NN from local run_id=24); safe to re-run |
 | `scripts/r/05_search_explorer.R` | Shiny app — interactive move scorer; navigate positions, compare move rankings by depth |
 | `scripts/r/06_search_mechanics.R` | Step-by-step walkthrough: board evaluation feature-by-feature, negamax depth-by-depth |
 | `scripts/r/06_stockfish_arena.R` | Shiny app — Live Game (engine vs Stockfish) and ELO Benchmark read-only viewer (polls DB every 30s); run benchmarks via `05_stockfish_benchmark.R` |
-| `scripts/r/07_human_play.R` | Shiny app — Human vs engine with real TD(0) weight updates and post-game learning diagnostics; v2-aware: auto-detects active v2 human run or creates one seeded from `SEED_RUN_ID`; logs `engine_version` and `human_color` |
+| `scripts/r/07_human_play.R` | Shiny app — Human vs engine with real TD(0) weight updates and post-game learning diagnostics; v2-aware: auto-detects active v2 human run or creates one seeded from `SEED_RUN_ID`; logs `engine_version` and `human_color`. **Session 18:** full NN support — engine_nn option in UI; separate `session_nn_model` / `session_nn_optimizer` reactives; `nn_td_update()` via reticulate; `.pt` checkpoint saved after each human game; Frobenius norm diagnostics (value box, norm vs self-play baseline, session norm history chart); NN-aware live feature table |
 | `public_app/app.R` | Crowdsourced human-vs-engine Shiny app for shinyapps.io; Supabase PostgreSQL backend; chessboard.js drag-and-drop board; all public players share one evolving engine (PUBLIC_RUN_ID=1) |
 | `public_app/engine.py` | Copy of `engine.py` (v2) for deployment alongside `public_app/app.R` |
 
@@ -253,16 +264,25 @@ Execute the following steps **in order**, without waiting for individual confirm
    - Overnight jobs scheduled
    - Steps for next session
 
-4. **Update `AGENTS.md`** — refresh any stale sections:
+4. **Update `ChessLearningDocumentation.md`** — refresh any stale sections:
+   - Status header (session number, active run)
+   - Current Weight State (latest run weights and sign count)
+   - Chess Concept Features table (if features changed)
+   - Folder Structure and File Descriptions (new/renamed files)
+   - Open Questions (resolved or new)
+   - Feature Improvement Candidates (status changes)
+   - Key Decisions Made (new architectural decisions)
+
+6. **Update `AGENTS.md`** — refresh any stale sections:
    - Current Architecture header (session number)
    - Key Run History table
    - Current Weight State
    - DB schema (table count)
    - R Analysis Scripts table (new files)
 
-5. **Update `GitLog.md`** — append an entry if any git operations were performed this session (commands, outcomes, issues resolved)
+7. **Update `GitLog.md`** — append an entry if any git operations were performed this session (commands, outcomes, issues resolved)
 
-6. **Git commit and push**:
+8. **Git commit and push**:
    ```bash
    git add -A
    git commit -m "<concise summary of session work>"

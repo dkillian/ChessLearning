@@ -27,7 +27,7 @@ DEFAULT_SEED_RUN <- 18L   # fallback seed run shown in selector on first launch
 # ---- Python modules ----
 
 # Clear both cached engine modules so the app always loads latest from disk
-py_run_string("import sys; [sys.modules.pop(m, None) for m in ['engine', 'engine_learnable_material']]")
+py_run_string("import sys; [sys.modules.pop(m, None) for m in ['engine', 'engine_learnable_material', 'engine_nn']]")
 
 chess_mod <- import("chess")
 chess_svg <- import("chess.svg")
@@ -36,6 +36,10 @@ ENGINES <- list(
     engine                    = import_from_path("engine", path = ENGINE_PATH),
     engine_learnable_material = tryCatch(
         import_from_path("engine_learnable_material", path = ENGINE_PATH),
+        error = function(e) NULL
+    ),
+    engine_nn                 = tryCatch(
+        import_from_path("engine_nn", path = ENGINE_PATH),
         error = function(e) NULL
     )
 )
@@ -47,6 +51,8 @@ DB_PATH <- if (file.exists("../../data/chess_learning.db")) {
 } else {
     "data/chess_learning.db"
 }
+
+MODEL_DIR <- if (file.exists("../../models")) "../../models" else "models"
 
 # ---- Helpers ----
 
@@ -62,23 +68,29 @@ get_run_ids <- function() {
 # Returns run_ids appropriate for the given engine type, excluding human-play runs
 get_runs_for_engine <- function(engine_type) {
     con <- dbConnect(SQLite(), DB_PATH)
-    if (engine_type == "engine_learnable_material") {
+    if (engine_type == "engine_nn") {
+        ids <- dbGetQuery(con,
+            "SELECT DISTINCT r.run_id FROM runs r
+             WHERE r.notes LIKE '%neural_net%'
+               AND r.notes NOT LIKE 'Human play%'
+             ORDER BY r.run_id DESC")$run_id
+    } else if (engine_type == "engine_learnable_material") {
         ids <- dbGetQuery(con,
             "SELECT DISTINCT w.run_id FROM weights w
+             JOIN runs r ON r.run_id = w.run_id
              WHERE w.feature_name = 'material_queen'
-               AND w.run_id NOT IN (
-                   SELECT run_id FROM runs WHERE notes LIKE 'Human play%'
-               )
+               AND r.notes NOT LIKE 'Human play%'
+               AND r.notes NOT LIKE '%neural_net%'
              ORDER BY w.run_id DESC")$run_id
     } else {
         ids <- dbGetQuery(con,
             "SELECT DISTINCT w.run_id FROM weights w
+             JOIN runs r ON r.run_id = w.run_id
              WHERE w.run_id NOT IN (
                  SELECT DISTINCT run_id FROM weights WHERE feature_name = 'material_queen'
              )
-               AND w.run_id NOT IN (
-                   SELECT run_id FROM runs WHERE notes LIKE 'Human play%'
-               )
+               AND r.notes NOT LIKE 'Human play%'
+               AND r.notes NOT LIKE '%neural_net%'
              ORDER BY w.run_id DESC")$run_id
     }
     dbDisconnect(con)
@@ -230,6 +242,79 @@ log_human_game <- function(run_id, game_number, outcome, n_half,
     dbDisconnect(con)
 }
 
+# Returns run_id of existing NN human play run seeded from source_run_id, or NULL
+get_active_nn_human_run <- function(source_run_id) {
+    con  <- dbConnect(SQLite(), DB_PATH)
+    rows <- dbGetQuery(con, sprintf(
+        "SELECT run_id FROM runs
+         WHERE notes LIKE 'Human play (neural_net)%%'
+           AND notes LIKE '%%run_id=%d,%%'
+         ORDER BY run_id ASC LIMIT 1",
+        as.integer(source_run_id)))
+    dbDisconnect(con)
+    if (nrow(rows) == 0) NULL else rows$run_id[1]
+}
+
+create_new_nn_run <- function(source_run_id, source_checkpoint, attr_weights) {
+    con <- dbConnect(SQLite(), DB_PATH)
+    dbExecute(con,
+        "INSERT INTO runs (started_at, depth, learning_rate, move_limit, notes, engine_version)
+         SELECT datetime('now'), depth, learning_rate, move_limit,
+                printf('Human play (neural_net) — seeded from run_id=%d, game=%d', ?, ?),
+                'v2'
+         FROM runs WHERE run_id = ? ORDER BY run_id LIMIT 1",
+        list(source_run_id, source_checkpoint, source_run_id))
+    new_run_id <- as.integer(dbGetQuery(con, "SELECT last_insert_rowid()")[[1]])
+    # Log initial attribution weights (compatible with R analysis scripts)
+    for (fname in names(attr_weights)) {
+        dbExecute(con,
+            "INSERT INTO weights (run_id, game_number, feature_name, weight_value)
+             VALUES (?, 0, ?, ?)",
+            list(new_run_id, fname, attr_weights[[fname]]))
+    }
+    dbDisconnect(con)
+    new_run_id
+}
+
+log_human_game_nn <- function(run_id, game_number, outcome, n_half,
+                               elapsed, nn_result, pgn_str, human_color,
+                               model, model_dir) {
+    # Convert Python dicts to R named vectors
+    deltas  <- setNames(as.numeric(unlist(nn_result$deltas)),
+                        names(nn_result$deltas))
+    attr_w  <- setNames(as.numeric(unlist(nn_result$attr_weights)),
+                        names(nn_result$attr_weights))
+    td_err  <- as.numeric(nn_result$td_error)
+
+    con <- dbConnect(SQLite(), DB_PATH)
+    dbExecute(con,
+        "INSERT INTO games (run_id,game_number,outcome,n_halfmoves,duration_s,terminated_by,human_color)
+         VALUES (?,?,?,?,?,'natural',?)",
+        list(run_id, game_number, outcome, n_half, elapsed, human_color))
+    dbExecute(con,
+        "INSERT INTO game_records (run_id,game_number,pgn,td_error)
+         VALUES (?,?,?,?)",
+        list(run_id, game_number, pgn_str, td_err))
+    for (fname in names(deltas)) {
+        dbExecute(con,
+            "INSERT INTO weight_deltas (run_id,game_number,feature_name,delta)
+             VALUES (?,?,?,?)",
+            list(run_id, game_number, fname, deltas[[fname]]))
+    }
+    # Attribution weights logged as "weights" — compatible with R analysis scripts
+    for (fname in names(attr_w)) {
+        dbExecute(con,
+            "INSERT INTO weights (run_id,game_number,feature_name,weight_value)
+             VALUES (?,?,?,?)",
+            list(run_id, game_number, fname, attr_w[[fname]]))
+    }
+    dbDisconnect(con)
+    # Save model checkpoint (.pt)
+    model_path <- file.path(model_dir,
+        sprintf("nn_run_%d_game_%d.pt", as.integer(run_id), as.integer(game_number)))
+    ENGINES[["engine_nn"]]$save_model(model, model_path)
+}
+
 build_pgn <- function(san_moves) {
     pairs <- split(san_moves, ceiling(seq_along(san_moves) / 2))
     paste(mapply(function(p, i) paste0(i, ". ", paste(p, collapse = " ")),
@@ -333,7 +418,8 @@ ui <- page_sidebar(
             selectInput("ui_engine", "Engine type",
                 choices = c(
                     "Hardcoded material" = "engine",
-                    "Learnable material" = "engine_learnable_material"
+                    "Learnable material" = "engine_learnable_material",
+                    "Neural net (MLP)"   = "engine_nn"
                 ),
                 selected = "engine"),
             selectInput("ui_seed_run",    "Seed run",   choices = NULL),
@@ -400,12 +486,28 @@ server <- function(input, output, session) {
 
     # ── Session state ──────────────────────────────────────────────────────
 
-    session_run_id  <- reactiveVal(NULL)
-    session_weights <- reactiveVal(NULL)
-    game_number_rv  <- reactiveVal(0L)
-    src_td_errors   <- reactiveVal(numeric(0))
-    source_run_info <- reactiveVal(list(run_id = NULL, checkpoint = NULL))
-    active_engine_mod <- reactiveVal(ENGINES[["engine"]])  # locked in on New Game
+    session_run_id       <- reactiveVal(NULL)
+    session_weights      <- reactiveVal(NULL)   # named numeric vec; linear engines only
+    session_nn_model     <- reactiveVal(NULL)   # ChessNet object; engine_nn only
+    session_nn_optimizer <- reactiveVal(NULL)   # Adam optimizer; engine_nn only
+    game_number_rv       <- reactiveVal(0L)
+    src_td_errors        <- reactiveVal(numeric(0))
+    source_run_info      <- reactiveVal(list(run_id = NULL, checkpoint = NULL))
+    active_engine_mod    <- reactiveVal(ENGINES[["engine"]])  # locked in on New Game
+
+    # TRUE when the active session is using the neural net engine
+    is_nn_engine <- function() !is.null(session_nn_model())
+
+    # Returns the second argument for evaluate() / get_best_move():
+    # the ChessNet model for NN sessions, or a named list for linear sessions.
+    get_engine_params <- function() {
+        if (is_nn_engine()) session_nn_model() else as.list(session_weights())
+    }
+
+    # NN-specific session state
+    session_nn_attrs     <- reactiveVal(NULL)       # latest attribution weights (named vec)
+    session_nn_param_norms <- reactiveVal(numeric(0)) # Frobenius norm per human game
+    session_nn_sp_baseline <- reactiveVal(NA_real_)   # avg per-game norm from seed self-play
 
     # Pre-populate selectors on startup using auto-detected active run as hint
     .active_run <- get_active_human_run()
@@ -506,31 +608,98 @@ server <- function(input, output, session) {
         eng_key   <- input$ui_engine
 
         if (is.null(session_run_id())) {
-            # Check for an existing human-play run seeded from this config
-            .existing <- get_active_human_run()
-            if (!is.null(.existing) && parse_source_run_id(.existing) == seed_run) {
-                .latest  <- get_checkpoints(.existing)[1]
-                .wv      <- load_weights_vec(.existing, .latest)
-                .gn      <- get_latest_game_number(.existing)
-                .src_id  <- seed_run
-                session_run_id(.existing)
+
+            if (eng_key == "engine_nn") {
+                # ── Neural net path ──────────────────────────────────────────
+                nn_mod     <- ENGINES[["engine_nn"]]
+                model_path <- file.path(MODEL_DIR,
+                    sprintf("nn_run_%d_game_%d.pt", seed_run, seed_ckpt))
+                if (!file.exists(model_path)) {
+                    showNotification(
+                        paste("Model checkpoint not found:", model_path),
+                        type = "error", duration = 8)
+                    return()
+                }
+                nn_model <- nn_mod$load_model(model_path)
+
+                # Check for existing NN human play run seeded from this config
+                .existing_nn <- get_active_nn_human_run(seed_run)
+                if (!is.null(.existing_nn)) {
+                    # Reload latest .pt from that run
+                    .latest_gn  <- get_latest_game_number(.existing_nn)
+                    .latest_path <- file.path(MODEL_DIR,
+                        sprintf("nn_run_%d_game_%d.pt", .existing_nn, .latest_gn))
+                    if (file.exists(.latest_path))
+                        nn_model <- nn_mod$load_model(.latest_path)
+                    session_run_id(.existing_nn)
+                    game_number_rv(get_latest_game_number(.existing_nn))
+                } else {
+                    # Create new NN human play run seeded from attribution weights
+                    attr_r <- setNames(
+                        as.numeric(unlist(nn_mod$attribution_weights(nn_model))),
+                        nn_mod$FEATURE_NAMES)
+                    .new_run <- create_new_nn_run(seed_run, seed_ckpt, attr_r)
+                    session_run_id(.new_run)
+                    game_number_rv(0L)
+                }
+                session_nn_model(nn_model)
+                session_nn_optimizer(nn_mod$make_optimizer(nn_model))
+                session_weights(NULL)
+                session_nn_attrs(NULL)
+                session_nn_param_norms(numeric(0))
+                source_run_info(list(run_id = seed_run, checkpoint = seed_ckpt))
+                active_engine_mod(ENGINES[["engine_nn"]])
+
+                # Populate src_td_errors from seed run for TD histogram
+                .con_td <- dbConnect(SQLite(), DB_PATH)
+                .sp_errs <- dbGetQuery(.con_td, sprintf(
+                    "SELECT td_error FROM game_records WHERE run_id=%d AND td_error IS NOT NULL",
+                    as.integer(seed_run)))$td_error
+                dbDisconnect(.con_td)
+                src_td_errors(.sp_errs)
+
+                # Compute self-play baseline norm from seed run's last checkpoint interval
+                .prev_ckpt <- seed_ckpt - 10L
+                .path_a <- file.path(MODEL_DIR, sprintf("nn_run_%d_game_%d.pt", seed_run, .prev_ckpt))
+                .path_b <- file.path(MODEL_DIR, sprintf("nn_run_%d_game_%d.pt", seed_run, seed_ckpt))
+                if (file.exists(.path_a) && file.exists(.path_b)) {
+                    .baseline <- tryCatch(
+                        as.numeric(nn_mod$compute_baseline_norm(.path_a, .path_b, 10L)),
+                        error = function(e) NA_real_)
+                    session_nn_sp_baseline(.baseline)
+                } else {
+                    session_nn_sp_baseline(NA_real_)
+                }
+
             } else {
-                .wv      <- load_weights_vec(seed_run, seed_ckpt)
-                .new_run <- create_new_run(seed_run, seed_ckpt, .wv)
-                .gn      <- 0L
-                .src_id  <- seed_run
-                session_run_id(.new_run)
+                # ── Linear path (unchanged) ───────────────────────────────────
+                .existing <- get_active_human_run()
+                if (!is.null(.existing) && parse_source_run_id(.existing) == seed_run) {
+                    .latest  <- get_checkpoints(.existing)[1]
+                    .wv      <- load_weights_vec(.existing, .latest)
+                    .gn      <- get_latest_game_number(.existing)
+                    .src_id  <- seed_run
+                    session_run_id(.existing)
+                } else {
+                    .wv      <- load_weights_vec(seed_run, seed_ckpt)
+                    .new_run <- create_new_run(seed_run, seed_ckpt, .wv)
+                    .gn      <- 0L
+                    .src_id  <- seed_run
+                    session_run_id(.new_run)
+                }
+                session_weights(.wv)
+                session_nn_model(NULL)
+                session_nn_optimizer(NULL)
+                game_number_rv(.gn)
+                source_run_info(list(run_id = .src_id, checkpoint = seed_ckpt))
+                .con    <- dbConnect(SQLite(), DB_PATH)
+                .errors <- dbGetQuery(.con, sprintf(
+                    "SELECT td_error FROM game_records WHERE run_id=%d AND td_error IS NOT NULL",
+                    as.integer(.src_id)))$td_error
+                dbDisconnect(.con)
+                src_td_errors(.errors)
+                active_engine_mod(ENGINES[[eng_key]])
             }
-            session_weights(.wv)
-            game_number_rv(.gn)
-            source_run_info(list(run_id = .src_id, checkpoint = seed_ckpt))
-            .con    <- dbConnect(SQLite(), DB_PATH)
-            .errors <- dbGetQuery(.con, sprintf(
-                "SELECT td_error FROM game_records WHERE run_id=%d AND td_error IS NOT NULL",
-                as.integer(.src_id)))$td_error
-            dbDisconnect(.con)
-            src_td_errors(.errors)
-            active_engine_mod(ENGINES[[eng_key]])
         }
 
         col <- if (input$human_color == "White") chess_mod$WHITE else chess_mod$BLACK
@@ -562,16 +731,21 @@ server <- function(input, output, session) {
     record_position <- function(board) {
         feats_py <- active_engine_mod()$extract_features(board)
         feat_vec <- setNames(as.numeric(unlist(feats_py)), names(feats_py))
-        positions_rv(c(positions_rv(), list(list(
+        pos_entry <- list(
             features = feat_vec,
             names    = names(feat_vec),
             is_white = board$turn == chess_mod$WHITE
-        ))))
+        )
+        # For NN: also store the raw Python feature dict and color for nn_td_update()
+        if (is_nn_engine()) {
+            pos_entry$py_feat  <- feats_py
+            pos_entry$py_color <- board$turn
+        }
+        positions_rv(c(positions_rv(), list(pos_entry)))
     }
 
     update_eval_history <- function(board_after) {
-        wp <- as.list(session_weights())
-        s  <- as.numeric(active_engine_mod()$evaluate(board_after, wp))
+        s <- as.numeric(active_engine_mod()$evaluate(board_after, get_engine_params()))
         white_eval <- if (board_after$turn == chess_mod$WHITE) s else -s
         eval_history(c(eval_history(), white_eval))
     }
@@ -622,11 +796,10 @@ server <- function(input, output, session) {
 
     play_engine_move <- function() {
         b  <- current_board()
-        wp <- as.list(session_weights())
         record_position(b)
 
         tryCatch({
-            mv  <- active_engine_mod()$get_best_move(b, wp, as.integer(input$depth), FALSE)[[1]]
+            mv  <- active_engine_mod()$get_best_move(b, get_engine_params(), as.integer(input$depth), FALSE)[[1]]
             req(!is.null(mv))
             san <- b$san(mv)
             move_history(c(move_history(), mv$uci()))
@@ -652,28 +825,63 @@ server <- function(input, output, session) {
         send_board_update(is_human_turn = FALSE)
 
         elapsed <- proc.time()[["elapsed"]] - (game_start_t() %||% 0)
-        wv  <- session_weights()
         pos <- positions_rv()
         if (length(pos) == 0) return()
-
-        result <- run_td_update(pos, outcome, wv,
-            lr             = 0.001,
-            draw_lr_scales = list(king_safety = 0.05, center_control = 0.2))
-
-        session_weights(result$weights)
         gn  <- game_number_rv() + 1L
         game_number_rv(gn)
-        hc <- if (human_color() == chess_mod$BLACK) "black" else "white"
-        log_human_game(session_run_id(), gn, outcome,
-                       length(move_history()), elapsed, result, build_pgn(move_san_log()), hc)
+        hc  <- if (human_color() == chess_mod$BLACK) "black" else "white"
+
+        if (is_nn_engine()) {
+            # ── Neural net TD update ──────────────────────────────────────────
+            model     <- session_nn_model()
+            optimizer <- session_nn_optimizer()
+            feat_dicts <- lapply(pos, function(p) p$py_feat)
+            colors     <- lapply(pos, function(p) p$py_color)
+
+            nn_result <- ENGINES[["engine_nn"]]$nn_td_update(
+                model, optimizer, feat_dicts, colors, outcome, 0.1)
+
+            session_nn_model(model)  # model mutated in-place; reassign for reactivity
+            log_human_game_nn(session_run_id(), gn, outcome,
+                              length(move_history()), elapsed,
+                              nn_result, build_pgn(move_san_log()), hc,
+                              model, MODEL_DIR)
+
+            # Extract and store NN-specific diagnostics
+            .deltas  <- setNames(as.numeric(unlist(nn_result$deltas)),          names(nn_result$deltas))
+            .attrs   <- setNames(as.numeric(unlist(nn_result$attr_weights)),     names(nn_result$attr_weights))
+            .pnorm   <- as.numeric(nn_result$param_norm)
+            .perrors <- as.numeric(unlist(nn_result$position_errors))
+
+            session_nn_attrs(.attrs)
+            session_nn_param_norms(c(session_nn_param_norms(), .pnorm))
+
+            result  <- list(
+                weights  = .attrs,
+                deltas   = .deltas,
+                td_error = as.numeric(nn_result$td_error),
+                errors   = .perrors,
+                param_norm = .pnorm
+            )
+        } else {
+            # ── Linear TD update (unchanged) ─────────────────────────────────
+            wv     <- session_weights()
+            result <- run_td_update(pos, outcome, wv,
+                lr             = 0.001,
+                draw_lr_scales = list(king_safety = 0.05, center_control = 0.2))
+            session_weights(result$weights)
+            log_human_game(session_run_id(), gn, outcome,
+                           length(move_history()), elapsed, result, build_pgn(move_san_log()), hc)
+        }
 
         post_game_rv(list(
-            result   = result,
-            positions = pos,
-            outcome  = outcome,
-            n_half   = length(pos),
-            moves    = move_history(),
-            td_error = result$td_error
+            result     = result,
+            positions  = pos,
+            outcome    = outcome,
+            n_half     = length(pos),
+            moves      = move_history(),
+            td_error   = result$td_error,
+            param_norm = result$param_norm %||% NA_real_
         ))
     }
 
@@ -768,17 +976,32 @@ server <- function(input, output, session) {
 
     output$feature_table <- renderTable({
         req(game_active())
-        wp       <- session_weights()
         feats_py <- active_engine_mod()$extract_features(current_board())
         feat_vec <- setNames(as.numeric(unlist(feats_py)), names(feats_py))
-        tibble(
-            Feature      = names(feat_vec),
-            Value        = feat_vec,
-            Weight       = wp[names(feat_vec)],
-            Contribution = feat_vec * wp[names(feat_vec)]
-        ) |>
-            arrange(desc(abs(Contribution))) |>
-            mutate(across(where(is.numeric), \(x) round(x, 4)))
+
+        if (is_nn_engine()) {
+            # Attribution weights (dV/dx_i) used in place of linear weights
+            attrs <- session_nn_attrs()
+            if (is.null(attrs)) attrs <- setNames(rep(0, length(feat_vec)), names(feat_vec))
+            tibble(
+                Feature     = names(feat_vec),
+                Value       = feat_vec,
+                Attribution = attrs[names(feat_vec)],
+                Sensitivity = feat_vec * attrs[names(feat_vec)]
+            ) |>
+                arrange(desc(abs(Sensitivity))) |>
+                mutate(across(where(is.numeric), \(x) round(x, 4)))
+        } else {
+            wp <- session_weights()
+            tibble(
+                Feature      = names(feat_vec),
+                Value        = feat_vec,
+                Weight       = wp[names(feat_vec)],
+                Contribution = feat_vec * wp[names(feat_vec)]
+            ) |>
+                arrange(desc(abs(Contribution))) |>
+                mutate(across(where(is.numeric), \(x) round(x, 4)))
+        }
     }, striped = TRUE, bordered = FALSE, small = TRUE)
 
     output$eval_trajectory <- renderPlot({
@@ -797,42 +1020,88 @@ server <- function(input, output, session) {
     # Post-game panel ----
     output$post_game_panel <- renderUI({
         req(!is.null(post_game_rv()))
+        nn <- is_nn_engine()
         tagList(
             uiOutput("pg_summary_boxes"),
             card(
-                card_header("Weight changes from this game"),
+                card_header(if (nn) "Attribution changes from this game" else "Weight changes from this game"),
                 plotOutput("pg_delta_chart", height = "240px")
             ),
             card(
                 card_header("Top learning moments"),
                 uiOutput("pg_moments")
             ),
+            if (nn) card(
+                card_header("Parameter update magnitude — this session"),
+                plotOutput("pg_norm_history", height = "160px")
+            ),
             card(
-                card_header("This game vs self-play"),
+                card_header("TD error vs self-play distribution"),
                 plotOutput("pg_histogram", height = "200px")
             )
         )
     })
 
+    output$pg_norm_history <- renderPlot({
+        req(is_nn_engine())
+        norms    <- session_nn_param_norms()
+        baseline <- session_nn_sp_baseline()
+        req(length(norms) > 0)
+        df <- tibble(game = seq_along(norms), norm = norms)
+        p  <- ggplot(df, aes(x = game, y = norm)) +
+            geom_line(linewidth = 0.8) +
+            geom_point(size = 2.5) +
+            labs(x = "Human game (this session)", y = "Frobenius norm") +
+            theme_minimal(base_size = 12)
+        if (!is.na(baseline)) {
+            p <- p +
+                geom_hline(yintercept = baseline, linetype = "dashed",
+                           color = "steelblue", linewidth = 0.7) +
+                annotate("text", x = Inf, y = baseline, hjust = 1.1, vjust = -0.4,
+                         label = sprintf("Self-play avg (%.4f)", baseline),
+                         color = "steelblue", size = 3.2)
+        }
+        p
+    })
+
     output$pg_summary_boxes <- renderUI({
-        pg       <- post_game_rv()
+        pg          <- post_game_rv()
         req(!is.null(pg))
         sp_errors   <- src_td_errors()
         sp_mean     <- if (length(sp_errors) > 0) mean(sp_errors) else NA_real_
-        rel_label   <- if (!is.na(sp_mean)) {
-            sprintf("%+.0f%% vs avg", (pg$td_error / sp_mean - 1) * 100)
-        } else "\u2014"
         total_delta <- sum(abs(pg$result$deltas))
 
-        layout_column_wrap(
-            width = 1/3, fill = FALSE,
-            value_box("TD error",     sprintf("%.4f", pg$td_error),
-                      theme = "primary",   showcase = bs_icon("lightning")),
-            value_box("vs self-play", rel_label,
-                      theme = "secondary", showcase = bs_icon("bar-chart")),
-            value_box("Total \u0394w", sprintf("%.4f", total_delta),
-                      theme = "light",     showcase = bs_icon("arrow-left-right"))
-        )
+        if (is_nn_engine()) {
+            # NN boxes: TD error | Param Δ (Frobenius) | vs self-play norm
+            pnorm    <- pg$param_norm
+            baseline <- session_nn_sp_baseline()
+            vs_label <- if (!is.na(pnorm) && !is.na(baseline) && baseline > 0) {
+                sprintf("%.1f\u00d7 self-play", pnorm / baseline)
+            } else "\u2014"
+            pnorm_label <- if (!is.na(pnorm)) sprintf("%.4f", pnorm) else "\u2014"
+            layout_column_wrap(
+                width = 1/3, fill = FALSE,
+                value_box("TD error",     sprintf("%.4f", pg$td_error),
+                          theme = "primary",   showcase = bs_icon("lightning")),
+                value_box("Param \u0394 (Frob.)", pnorm_label,
+                          theme = "info",      showcase = bs_icon("arrows-move")),
+                value_box("vs self-play", vs_label,
+                          theme = "secondary", showcase = bs_icon("bar-chart"))
+            )
+        } else {
+            rel_label <- if (!is.na(sp_mean)) {
+                sprintf("%+.0f%% vs avg", (pg$td_error / sp_mean - 1) * 100)
+            } else "\u2014"
+            layout_column_wrap(
+                width = 1/3, fill = FALSE,
+                value_box("TD error",     sprintf("%.4f", pg$td_error),
+                          theme = "primary",   showcase = bs_icon("lightning")),
+                value_box("vs self-play", rel_label,
+                          theme = "secondary", showcase = bs_icon("bar-chart")),
+                value_box("Total \u0394w", sprintf("%.4f", total_delta),
+                          theme = "light",     showcase = bs_icon("arrow-left-right"))
+            )
+        }
     })
 
     output$pg_delta_chart <- renderPlot({

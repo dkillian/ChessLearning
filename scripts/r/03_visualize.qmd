@@ -487,6 +487,109 @@ if (nrow(emergence) == 0) {
 }
 ```
 
+## Stockfish Benchmark — ELO Estimates
+
+ELO is estimated from each benchmark match using the standard Elo performance rating formula:
+
+$$\hat{E} = R_{\text{SF}} - 400 \cdot \log_{10}\!\left(\frac{1}{S} - 1\right)$$
+
+where $S = (\text{wins} + 0.5 \cdot \text{draws}) \,/\, n$ is the match score against Stockfish at rating $R_{\text{SF}}$ (minimum 1320 in Stockfish 19). Error bars are 95% Wilson confidence intervals on $S$, mapped through the same formula. Estimates are omitted when $S = 0$ or $S = 1$ (formula is undefined).
+
+```{r elo-setup}
+library(tidyverse)
+
+sf_evals_raw <- tbl(con, "stockfish_evals") |> collect()
+
+# ELO performance rating from match score S against known opponent ELO
+elo_from_score <- function(s, opp_elo) {
+    opp_elo - 400 * log10(1 / s - 1)
+}
+
+sf_evals <- sf_evals_raw |>
+    mutate(
+        n_total = wins + losses + draws,
+        score   = (wins + 0.5 * draws) / n_total,
+        elo_est = if_else(score > 0 & score < 1,
+                          elo_from_score(score, sf_elo), NA_real_),
+        # Wilson 95% CI on score, mapped through the ELO formula
+        # (ELO is monotonically increasing in score, so mapping is direct)
+        z      = 1.96,
+        denom  = 1 + z^2 / n_total,
+        center = (score + z^2 / (2 * n_total)) / denom,
+        margin = z * sqrt(score * (1 - score) / n_total + z^2 / (4 * n_total^2)) / denom,
+        s_lo   = pmax(0.001, center - margin),
+        s_hi   = pmin(0.999, center + margin),
+        elo_lo = if_else(score > 0 & score < 1, elo_from_score(s_lo, sf_elo), NA_real_),
+        elo_hi = if_else(score > 0 & score < 1, elo_from_score(s_hi, sf_elo), NA_real_)
+    ) |>
+    select(-z, -denom, -center, -margin, -s_lo, -s_hi) |>
+    left_join(
+        tbl(con, "runs") |>
+            select(run_id, notes) |>
+            collect() |>
+            mutate(notes = str_trunc(notes, 40)),
+        by = "run_id"
+    )
+```
+
+### Summary table
+
+```{r elo-table}
+sf_evals |>
+    select(run_id, game_number, source, sf_elo, n_games = n_total,
+           wins, losses, draws, score, elo_est) |>
+    arrange(run_id, game_number) |>
+    mutate(
+        score   = round(score, 3),
+        elo_est = round(elo_est, 0)
+    ) |>
+    flextable() |>
+    set_header_labels(
+        run_id      = "Run",
+        game_number = "Checkpoint",
+        source      = "Source",
+        sf_elo      = "SF ELO",
+        n_games     = "Games",
+        wins        = "W",
+        losses      = "L",
+        draws       = "D",
+        score       = "Score",
+        elo_est     = "Est. ELO"
+    ) |>
+    colformat_num(j = "elo_est", na_str = "—") |>
+    bg(i = ~ source == "benchmark", bg = "#f8f9fa") |>
+    flextable::set_caption(
+        "Stockfish benchmark results and ELO estimates (S=0 or S=1: estimate omitted)") |>
+    autofit()
+```
+
+### ELO trajectory
+
+Benchmark matches only (`source = 'benchmark'`). Each point is one match series; error bars are 95% Wilson CIs. The dashed line marks Stockfish's constrained ELO (1320 = minimum for Stockfish 19).
+
+```{r elo-plot, fig.height=4}
+sf_evals |>
+    filter(source == "benchmark", !is.na(elo_est)) |>
+    mutate(run_label = paste0("Run ", run_id)) |>
+    ggplot(aes(x = game_number, y = elo_est,
+               color = run_label, group = run_label)) +
+    geom_hline(yintercept = 1320, linetype = "dashed",
+               color = "grey50", linewidth = 0.6) +
+    annotate("text", x = -Inf, y = 1320, hjust = -0.1, vjust = -0.4,
+             label = "SF 1320", color = "grey50", size = 3.2) +
+    geom_errorbar(aes(ymin = elo_lo, ymax = elo_hi),
+                  width = 20, linewidth = 0.5, alpha = 0.6) +
+    geom_line(linewidth = 0.7, alpha = 0.5) +
+    geom_point(aes(size = n_total)) +
+    scale_size_continuous(name = "Games played", range = c(2, 5),
+                          breaks = c(10, 20, 30)) +
+    labs(x     = "Training games at benchmark",
+         y     = "Estimated ELO",
+         color = NULL,
+         title = "Engine ELO over training") +
+    theme(legend.position = "right")
+```
+
 ## Final Weights Summary
 
 Snapshot of weights at the end of each run.

@@ -1,0 +1,10 @@
+name: chess-learning
+title:
+username: dkillian
+account: dkillian
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 18172172
+bundleId: 12687367
+url: https://dkillian.shinyapps.io/chess-learning/
+version: 1

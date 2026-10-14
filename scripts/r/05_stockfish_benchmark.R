@@ -14,12 +14,12 @@ library(reticulate)
 
 # ---- Configuration ----
 
-RUN_ID        <- 21          # which run's weights to use
+RUN_ID        <- 24          # which run's weights to use
 CHECKPOINT    <- NULL        # NULL = latest checkpoint; or set an integer game number
 ELO_LEVELS    <- 1320        # Stockfish ELO levels to test (minimum is 1320)
 N_GAMES       <- 20          # games per ELO level (even number = balanced colours)
 DEPTH         <- 3L          # search depth for our engine
-ENGINE_MODULE <- "engine_learnable_material"  # "engine" (runs 1-19) or "engine_learnable_material" (run 20+)
+ENGINE_MODULE <- "engine_learnable_material"  # "engine" (runs 1-19) | "engine_learnable_material" (run 20+) | "engine_nn" (run 22+)
 
 # ---- Setup ----
 
@@ -47,7 +47,11 @@ chess_engine <- import("chess.engine")
 io_mod       <- import("io")
 engine_mod   <- import_from_path(ENGINE_MODULE, path = ENGINE_PATH)
 
-# ---- Load weights ----
+# ---- Load weights or model ----
+# engine_params holds either a named list (linear conditions) or a ChessNet
+# model object (engine_nn). get_best_move() accepts either.
+
+MODEL_DIR <- if (file.exists("../../models")) "../../models" else "models"
 
 con <- dbConnect(SQLite(), DB_PATH)
 
@@ -57,18 +61,26 @@ if (is.null(CHECKPOINT)) {
                 as.integer(RUN_ID)))$gn
 }
 
-wt_rows <- dbGetQuery(con, sprintf(
-    "SELECT feature_name, weight_value FROM weights
-     WHERE run_id = %d AND game_number = %d",
-    as.integer(RUN_ID), as.integer(CHECKPOINT)))
-
-dbDisconnect(con)
-
-if (nrow(wt_rows) == 0) stop("No weights found for run_id=", RUN_ID, ", checkpoint=", CHECKPOINT)
-weights_py <- as.list(setNames(wt_rows$weight_value, wt_rows$feature_name))
-
-cat(sprintf("Weights loaded: run_id=%d, checkpoint=%d, %d features\n",
-            RUN_ID, CHECKPOINT, nrow(wt_rows)))
+if (ENGINE_MODULE == "engine_nn") {
+    dbDisconnect(con)
+    model_path <- file.path(MODEL_DIR, sprintf("nn_run_%d_game_%d.pt", RUN_ID, CHECKPOINT))
+    if (!file.exists(model_path)) {
+        stop("Model file not found: ", model_path,
+             "\nExpected a .pt checkpoint saved by selfplay_nn.ipynb.")
+    }
+    engine_params <- engine_mod$load_model(model_path)
+    cat(sprintf("Model loaded: %s\n", model_path))
+} else {
+    wt_rows <- dbGetQuery(con, sprintf(
+        "SELECT feature_name, weight_value FROM weights
+         WHERE run_id = %d AND game_number = %d",
+        as.integer(RUN_ID), as.integer(CHECKPOINT)))
+    dbDisconnect(con)
+    if (nrow(wt_rows) == 0) stop("No weights found for run_id=", RUN_ID, ", checkpoint=", CHECKPOINT)
+    engine_params <- as.list(setNames(wt_rows$weight_value, wt_rows$feature_name))
+    cat(sprintf("Weights loaded: run_id=%d, checkpoint=%d, %d features\n",
+                RUN_ID, CHECKPOINT, nrow(wt_rows)))
+}
 
 # ---- Create stockfish_games table if needed ----
 
@@ -118,7 +130,7 @@ play_one_game <- function(sf_inst, engine_color) {
 
     while (!board$is_game_over(claim_draw = TRUE)) {
         mv <- if (board$turn == engine_color) {
-            engine_mod$get_best_move(board, weights_py, DEPTH, FALSE)[[1]]
+            engine_mod$get_best_move(board, engine_params, DEPTH, FALSE)[[1]]
         } else {
             sf_inst$play(board, chess_engine$Limit(time = 0.5), ponder = FALSE)$move
         }

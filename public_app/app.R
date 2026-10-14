@@ -1,7 +1,17 @@
 # public_app/app.R
-# Crowdsourced human vs engine — public shinyapps.io deployment.
-# All human games contribute TD(0) weight updates to a shared Supabase run.
-# Weights evolve collectively across all players.
+# Crowdsourced human vs engine — public deployment (shinyapps.io / Posit Connect).
+#
+# Three engine conditions are available. All players who choose the same
+# condition collectively train that condition's shared engine via TD(0) learning.
+#
+# Conditions:
+#   1. Hardcoded material   — run_id=1; 14 positional features; material hard-coded
+#   2. Learnable material   — run_id=2; 19 features (5 material + 14 positional)
+#   3. Neural net (MLP)     — run_id=3; 19-feature MLP (19→32→1); Adam optimizer
+#
+# Backend: Supabase PostgreSQL
+#   Tables: runs, games, game_records, weights, weight_deltas, nn_models
+#   The `nn_models` table stores the NN model as a base64-encoded blob (TEXT).
 
 library(shiny)
 library(bslib)
@@ -12,85 +22,189 @@ library(tidyverse)
 library(reticulate)
 
 # ---- Python environment ----
-# Install python-chess into a virtualenv on first cold start
 
 if (!virtualenv_exists("chess-public")) {
     virtualenv_create("chess-public")
-    virtualenv_install("chess-public", "chess", ignore_installed = FALSE)
+    virtualenv_install("chess-public",
+        packages         = "chess",
+        ignore_installed = FALSE)
 }
 use_virtualenv("chess-public", required = TRUE)
 
 chess_mod  <- import("chess")
 chess_svg  <- import("chess.svg")
-engine_mod <- import_from_path("engine", path = getwd())
+
+ENGINES <- list(
+    engine                    = import_from_path("engine",                    path = getwd()),
+    engine_learnable_material = import_from_path("engine_learnable_material", path = getwd())
+)
+
+# ---- Conditions config ----
+# Each condition maps to one shared Supabase run.
+# run_id values must match rows in the `runs` table in Supabase.
+
+CONDITIONS <- list(
+    "Hardcoded material" = list(
+        module = "engine",
+        run_id = 1L,
+        is_nn  = FALSE,
+        desc   = "14 positional features. Material values are hard-coded — the engine learns purely positional concepts."
+    ),
+    "Learnable material" = list(
+        module = "engine_learnable_material",
+        run_id = 2L,
+        is_nn  = FALSE,
+        desc   = "19 features (5 material + 14 positional). The engine learns piece values from scratch alongside positional concepts."
+    )
+)
+
+CONDITION_NAMES <- names(CONDITIONS)
 
 # ---- Database ----
 
+# Use the Supabase connection pooler (Session mode) to avoid IPv6 issues on
+# shinyapps.io. Find the host in Supabase dashboard:
+# Settings → Database → Connection pooling → Session mode → Host
 PG_CREDS <- list(
-    host     = "db.betniftrhjpeacfzjoym.supabase.co",
+    host     = "aws-0-us-east-1.pooler.supabase.com",
     port     = 5432L,
     dbname   = "postgres",
-    user     = "postgres",
+    user     = "postgres.betniftrhjpeacfzjoym",   # pooler requires project-scoped user
     password = Sys.getenv("SUPABASE_PASSWORD"),
     sslmode  = "require"
 )
 
-PUBLIC_RUN_ID <- 1L
+pg_connect <- function() {
+    tryCatch(
+        do.call(dbConnect, c(list(Postgres()), PG_CREDS)),
+        error = function(e) stop("Database unavailable: ", conditionMessage(e))
+    )
+}
 
-pg_connect <- function() do.call(dbConnect, c(list(Postgres()), PG_CREDS))
-
-load_latest_weights <- function() {
+# Load latest linear weights for a given run_id
+load_latest_weights <- function(run_id) {
     pg  <- pg_connect()
     gn  <- dbGetQuery(pg,
         "SELECT MAX(game_number) FROM weights WHERE run_id = $1",
-        list(PUBLIC_RUN_ID))[[1]]
+        list(run_id))[[1]]
     rows <- dbGetQuery(pg,
         "SELECT feature_name, weight_value FROM weights
          WHERE run_id = $1 AND game_number = $2",
-        list(PUBLIC_RUN_ID, gn))
+        list(run_id, gn))
     dbDisconnect(pg)
     setNames(rows$weight_value, rows$feature_name)
 }
 
-log_public_game <- function(game_number, outcome, n_half, elapsed, td_result, pgn_str) {
+# Load latest NN model for a given run_id from the nn_models table
+load_latest_nn_model <- function(run_id) {
+    nn_mod <- ENGINES[["engine_nn"]]
+    pg  <- pg_connect()
+    row <- dbGetQuery(pg,
+        "SELECT model_b64, game_number FROM nn_models
+         WHERE run_id = $1 ORDER BY game_number DESC LIMIT 1",
+        list(run_id))
+    dbDisconnect(pg)
+    if (nrow(row) == 0) {
+        list(model = nn_mod$new_model(), game_number = 0L)
+    } else {
+        list(model       = nn_mod$model_from_b64(row$model_b64),
+             game_number = as.integer(row$game_number))
+    }
+}
+
+# Next game number for a run
+next_game_number <- function(run_id) {
+    pg <- pg_connect()
+    gn <- dbGetQuery(pg,
+        "SELECT COALESCE(MAX(game_number), 0) + 1 FROM games WHERE run_id = $1",
+        list(run_id))[[1]]
+    dbDisconnect(pg)
+    as.integer(gn)
+}
+
+get_game_counts <- function() {
+    pg   <- pg_connect()
+    rows <- dbGetQuery(pg,
+        "SELECT run_id, COUNT(*) AS n FROM games
+         WHERE run_id = ANY($1) GROUP BY run_id",
+        list(as.integer(sapply(CONDITIONS, `[[`, "run_id"))))
+    dbDisconnect(pg)
+    counts <- setNames(integer(length(CONDITIONS)), CONDITION_NAMES)
+    for (i in seq_len(nrow(rows))) {
+        nm <- CONDITION_NAMES[sapply(CONDITIONS, `[[`, "run_id") == rows$run_id[i]]
+        if (length(nm) == 1) counts[[nm]] <- rows$n[i]
+    }
+    counts
+}
+
+# Log a game for a linear condition
+log_linear_game <- function(run_id, game_number, outcome, n_half, elapsed, td_result, pgn_str) {
     pg <- pg_connect()
     dbExecute(pg,
         "INSERT INTO games (run_id, game_number, outcome, n_halfmoves, duration_s, terminated_by)
          VALUES ($1, $2, $3, $4, $5, 'natural')",
-        list(PUBLIC_RUN_ID, game_number, outcome, n_half, elapsed))
+        list(run_id, game_number, outcome, n_half, elapsed))
     dbExecute(pg,
         "INSERT INTO game_records (run_id, game_number, pgn, td_error)
          VALUES ($1, $2, $3, $4)",
-        list(PUBLIC_RUN_ID, game_number, pgn_str, td_result$td_error))
+        list(run_id, game_number, pgn_str, td_result$td_error))
     for (fname in names(td_result$deltas)) {
         dbExecute(pg,
             "INSERT INTO weight_deltas (run_id, game_number, feature_name, delta)
              VALUES ($1, $2, $3, $4)",
-            list(PUBLIC_RUN_ID, game_number, fname, td_result$deltas[[fname]]))
+            list(run_id, game_number, fname, td_result$deltas[[fname]]))
     }
     for (fname in names(td_result$weights)) {
         dbExecute(pg,
             "INSERT INTO weights (run_id, game_number, feature_name, weight_value)
              VALUES ($1, $2, $3, $4)",
-            list(PUBLIC_RUN_ID, game_number, fname, td_result$weights[[fname]]))
+            list(run_id, game_number, fname, td_result$weights[[fname]]))
     }
     dbDisconnect(pg)
 }
 
-get_game_count <- function() {
-    pg  <- pg_connect()
-    n   <- dbGetQuery(pg,
-        "SELECT COUNT(*) FROM games WHERE run_id = $1",
-        list(PUBLIC_RUN_ID))[[1]]
+# Log a game for the NN condition
+log_nn_game <- function(run_id, game_number, outcome, n_half, elapsed, nn_result, pgn_str, model) {
+    nn_mod   <- ENGINES[["engine_nn"]]
+    .deltas  <- setNames(as.numeric(unlist(nn_result$deltas)), names(nn_result$deltas))
+    .attrs   <- setNames(as.numeric(unlist(nn_result$attr_weights)), names(nn_result$attr_weights))
+    .td_err  <- as.numeric(nn_result$td_error)
+
+    pg <- pg_connect()
+    dbExecute(pg,
+        "INSERT INTO games (run_id, game_number, outcome, n_halfmoves, duration_s, terminated_by)
+         VALUES ($1, $2, $3, $4, $5, 'natural')",
+        list(run_id, game_number, outcome, n_half, elapsed))
+    dbExecute(pg,
+        "INSERT INTO game_records (run_id, game_number, pgn, td_error)
+         VALUES ($1, $2, $3, $4)",
+        list(run_id, game_number, pgn_str, .td_err))
+    for (fname in names(.deltas)) {
+        dbExecute(pg,
+            "INSERT INTO weight_deltas (run_id, game_number, feature_name, delta)
+             VALUES ($1, $2, $3, $4)",
+            list(run_id, game_number, fname, .deltas[[fname]]))
+    }
+    # Attribution weights — logged to the weights table for R analysis script compatibility
+    for (fname in names(.attrs)) {
+        dbExecute(pg,
+            "INSERT INTO weights (run_id, game_number, feature_name, weight_value)
+             VALUES ($1, $2, $3, $4)",
+            list(run_id, game_number, fname, .attrs[[fname]]))
+    }
+    # Save model state as base64 blob
+    dbExecute(pg,
+        "INSERT INTO nn_models (run_id, game_number, model_b64, updated_at)
+         VALUES ($1, $2, $3, NOW())",
+        list(run_id, game_number, nn_mod$model_to_b64(model)))
     dbDisconnect(pg)
-    n
 }
 
 # ---- Helpers ----
 
 `%||%` <- function(a, b) if (!is.null(a)) a else b
 
-board_svg_html <- function(board, last_move = NULL, flipped = FALSE, size = 160L) {
+board_svg_html <- function(board, last_move = NULL, flipped = FALSE, size = 360L) {
     args <- list(board = board, size = size, flipped = flipped)
     if (!is.null(last_move)) args$lastmove <- last_move
     if (board$is_check()) {
@@ -225,17 +339,26 @@ ui <- page_sidebar(
         tags$script(board_js),
         tags$style(HTML("
           .about-text { font-size: 0.85em; color: #555; line-height: 1.5; }
+          .cond-desc  { font-size: 0.80em; color: #666; margin-top: 4px; }
         "))
     ),
 
     sidebar = sidebar(
-        width = 260,
+        width = 280,
+
+        card(
+            card_header("Engine configuration"),
+            radioButtons("condition", NULL,
+                choices  = CONDITION_NAMES,
+                selected = CONDITION_NAMES[1]),
+            uiOutput("condition_desc")
+        ),
 
         card(
             card_header("New Game"),
             radioButtons("human_color", "Play as",
                 choices = c("White", "Black"), inline = TRUE),
-            sliderInput("depth", "Engine depth",
+            sliderInput("depth", "Search depth",
                 min = 1, max = 3, value = 2, step = 1, width = "100%"),
             actionButton("btn_new_game", "Start Game",
                 class = "btn-success w-100 mb-2"),
@@ -248,43 +371,40 @@ ui <- page_sidebar(
             p(class = "about-text",
               "Every game you play teaches the engine. ",
               "It uses ", tags$b("temporal difference learning"), " to update its ",
-              "positional weights after each game. ",
-              "All players share the same evolving engine.")
+              "weights after each game. ",
+              "All players who choose the same configuration share one evolving engine.")
         )
     ),
 
     layout_column_wrap(
-        width = 1/3, fill = FALSE,
+        width = 1/4, fill = FALSE,
         value_box("Status",       uiOutput("vb_status"),
                   theme = "primary",   showcase = bs_icon("circle-fill")),
         value_box("Engine eval",  uiOutput("vb_eval"),
                   theme = "secondary", showcase = bs_icon("speedometer")),
-        value_box("Games played", uiOutput("vb_game_count"),
-                  theme = "light",     showcase = bs_icon("people"))
+        value_box("This config",  uiOutput("vb_game_count"),
+                  theme = "light",     showcase = bs_icon("people")),
+        value_box("All configs",  uiOutput("vb_total_count"),
+                  theme = "light",     showcase = bs_icon("globe"))
     ),
 
     layout_columns(
         col_widths = c(5, 7),
 
-        # ── Board card ──────────────────────────────────────────────────────
         card(
             full_screen = TRUE,
             card_header(uiOutput("board_header")),
             div(style = "display:flex; justify-content:center; padding:12px 8px 4px;",
-                div(id = "chessboard", style = "width:380px;")
-            ),
+                div(id = "chessboard", style = "width:380px;")),
             uiOutput("move_list"),
             div(style = "padding:4px 8px 8px;",
                 actionButton("btn_undo", "\u21a9 Undo",
-                    class = "btn-outline-secondary btn-sm w-100")
-            ),
+                    class = "btn-outline-secondary btn-sm w-100")),
             card_footer(
                 style = "font-size:0.75em; color:#666; word-break:break-all;",
-                textOutput("fen_display")
-            )
+                textOutput("fen_display"))
         ),
 
-        # ── Diagnostics card ────────────────────────────────────────────────
         card(
             full_screen = TRUE,
             card_header(uiOutput("diag_header")),
@@ -297,9 +417,34 @@ ui <- page_sidebar(
 
 server <- function(input, output, session) {
 
-    # Load latest shared weights at session start
-    session_weights <- reactiveVal(load_latest_weights())
-    game_count_rv   <- reactiveVal(get_game_count())
+    # ── Session state ─────────────────────────────────────────────────────
+
+    # Condition locked in at game start; NULL between games allows UI changes
+    active_condition <- reactiveVal(NULL)   # condition name string
+    active_run_id    <- reactiveVal(NULL)   # integer
+
+    # Linear engine state
+    session_weights  <- reactiveVal(NULL)   # named numeric vector
+
+    # NN engine state
+    session_nn_model     <- reactiveVal(NULL)
+    session_nn_optimizer <- reactiveVal(NULL)
+    session_nn_attrs     <- reactiveVal(NULL)   # latest attribution weights
+
+    is_nn <- function() {
+        cond <- active_condition()
+        !is.null(cond) && CONDITIONS[[cond]]$is_nn
+    }
+
+    active_engine_mod <- function() {
+        cond <- active_condition()
+        if (is.null(cond)) ENGINES[[CONDITIONS[[1]]$module]]
+        else ENGINES[[CONDITIONS[[cond]]$module]]
+    }
+
+    get_engine_params <- function() {
+        if (is_nn()) session_nn_model() else as.list(session_weights())
+    }
 
     # ── Game state ─────────────────────────────────────────────────────────
     move_history <- reactiveVal(character(0))
@@ -312,6 +457,10 @@ server <- function(input, output, session) {
     game_result  <- reactiveVal(NULL)
     post_game_rv <- reactiveVal(NULL)
     game_start_t <- reactiveVal(NULL)
+    game_counts  <- reactiveVal(tryCatch(
+        get_game_counts(),
+        error = function(e) setNames(integer(length(CONDITIONS)), CONDITION_NAMES)
+    ))
 
     current_board <- reactive({
         b <- chess_mod$Board()
@@ -319,7 +468,35 @@ server <- function(input, output, session) {
         b
     })
 
-    output$vb_game_count <- renderUI({ game_count_rv() })
+    # ── Condition description ──────────────────────────────────────────────
+
+    output$condition_desc <- renderUI({
+        p(class = "cond-desc", CONDITIONS[[input$condition]]$desc)
+    })
+
+    # ── Value boxes ────────────────────────────────────────────────────────
+
+    output$vb_status <- renderUI({
+        gr <- game_result()
+        if (!is.null(gr)) switch(gr, "1-0" = "White wins", "0-1" = "Black wins", "Draw")
+        else if (game_active()) {
+            if (current_board()$turn == human_color()) "Your turn" else "Engine thinking\u2026"
+        } else "Choose config & start"
+    })
+
+    output$vb_eval <- renderUI({
+        req(length(eval_history()) > 0)
+        sprintf("%+.3f", tail(eval_history(), 1))
+    })
+
+    output$vb_game_count <- renderUI({
+        cond <- active_condition() %||% input$condition
+        as.character(game_counts()[[cond]] %||% 0L)
+    })
+
+    output$vb_total_count <- renderUI({
+        as.character(sum(game_counts()))
+    })
 
     # ── Board update helper ────────────────────────────────────────────────
 
@@ -329,11 +506,9 @@ server <- function(input, output, session) {
         lm  <- last_move_rv()
         ori <- if (!is.null(hc) && hc == chess_mod$BLACK) "black" else "white"
         hcc <- if (!is.null(hc) && hc == chess_mod$BLACK) "b"     else "w"
-
         lm_from  <- if (!is.null(lm)) chess_mod$square_name(lm$from_square) else NULL
         lm_to    <- if (!is.null(lm)) chess_mod$square_name(lm$to_square)   else NULL
         check_sq <- if (b$is_check()) chess_mod$square_name(b$king(b$turn)) else NULL
-
         session$sendCustomMessage("update_board", list(
             fen        = b$fen(),
             human_turn = is_human_turn,
@@ -348,8 +523,27 @@ server <- function(input, output, session) {
     # ── New game ──────────────────────────────────────────────────────────
 
     observeEvent(input$btn_new_game, {
-        # Reload latest shared weights so this game builds on all prior learning
-        session_weights(load_latest_weights())
+        cond   <- input$condition
+        cfg    <- CONDITIONS[[cond]]
+        run_id <- cfg$run_id
+
+        # Lock in condition for this game
+        active_condition(cond)
+        active_run_id(run_id)
+
+        # Load latest shared weights / model for this condition
+        if (cfg$is_nn) {
+            nn_mod  <- ENGINES[["engine_nn"]]
+            loaded  <- load_latest_nn_model(run_id)
+            session_nn_model(loaded$model)
+            session_nn_optimizer(nn_mod$make_optimizer(loaded$model))
+            session_nn_attrs(NULL)
+            session_weights(NULL)
+        } else {
+            session_weights(load_latest_weights(run_id))
+            session_nn_model(NULL)
+            session_nn_optimizer(NULL)
+        }
 
         col <- if (input$human_color == "White") chess_mod$WHITE else chess_mod$BLACK
         human_color(col)
@@ -378,18 +572,22 @@ server <- function(input, output, session) {
     # ── Position & eval recording ──────────────────────────────────────────
 
     record_position <- function(board) {
-        feats_py <- engine_mod$extract_features(board)
+        feats_py <- active_engine_mod()$extract_features(board)
         feat_vec <- setNames(as.numeric(unlist(feats_py)), names(feats_py))
-        positions_rv(c(positions_rv(), list(list(
+        pos_entry <- list(
             features = feat_vec,
             names    = names(feat_vec),
             is_white = board$turn == chess_mod$WHITE
-        ))))
+        )
+        if (is_nn()) {
+            pos_entry$py_feat  <- feats_py
+            pos_entry$py_color <- board$turn
+        }
+        positions_rv(c(positions_rv(), list(pos_entry)))
     }
 
     update_eval_history <- function(board_after) {
-        wp <- as.list(session_weights())
-        s  <- as.numeric(engine_mod$evaluate(board_after, wp))
+        s <- as.numeric(active_engine_mod()$evaluate(board_after, get_engine_params()))
         white_eval <- if (board_after$turn == chess_mod$WHITE) s else -s
         eval_history(c(eval_history(), white_eval))
     }
@@ -413,8 +611,8 @@ server <- function(input, output, session) {
         last_move_rv(mv)
         update_eval_history(current_board())
 
-        if (current_board()$is_game_over()) {
-            end_game(current_board()$result())
+        if (current_board()$is_game_over(claim_draw = TRUE)) {
+            end_game(current_board()$result(claim_draw = TRUE))
         } else {
             play_engine_move()
         }
@@ -438,12 +636,11 @@ server <- function(input, output, session) {
     # ── Engine move ────────────────────────────────────────────────────────
 
     play_engine_move <- function() {
-        b  <- current_board()
-        wp <- as.list(session_weights())
+        b <- current_board()
         record_position(b)
-
         tryCatch({
-            mv  <- engine_mod$get_best_move(b, wp, as.integer(input$depth), FALSE)[[1]]
+            mv  <- active_engine_mod()$get_best_move(b, get_engine_params(),
+                                                      as.integer(input$depth), FALSE)[[1]]
             req(!is.null(mv))
             san <- b$san(mv)
             move_history(c(move_history(), mv$uci()))
@@ -451,8 +648,8 @@ server <- function(input, output, session) {
             last_move_rv(mv)
             update_eval_history(current_board())
 
-            if (current_board()$is_game_over()) {
-                end_game(current_board()$result())
+            if (current_board()$is_game_over(claim_draw = TRUE)) {
+                end_game(current_board()$result(claim_draw = TRUE))
             } else {
                 send_board_update(is_human_turn = TRUE)
             }
@@ -468,27 +665,51 @@ server <- function(input, output, session) {
         game_result(outcome)
         send_board_update(is_human_turn = FALSE)
 
-        elapsed <- proc.time()[["elapsed"]] - (game_start_t() %||% 0)
-        wv  <- session_weights()
-        pos <- positions_rv()
+        elapsed  <- proc.time()[["elapsed"]] - (game_start_t() %||% 0)
+        pos      <- positions_rv()
         if (length(pos) == 0) return()
 
-        result <- run_td_update(pos, outcome, wv,
-            lr             = 0.001,
-            draw_lr_scales = list(king_safety = 0.05, center_control = 0.2))
+        run_id   <- active_run_id()
+        gn       <- next_game_number(run_id)
 
-        session_weights(result$weights)
+        if (is_nn()) {
+            nn_mod    <- ENGINES[["engine_nn"]]
+            model     <- session_nn_model()
+            optimizer <- session_nn_optimizer()
 
-        pg <- pg_connect()
-        gn <- dbGetQuery(pg,
-            "SELECT COALESCE(MAX(game_number), 0) + 1 FROM games WHERE run_id = $1",
-            list(PUBLIC_RUN_ID))[[1]]
-        dbDisconnect(pg)
+            nn_result <- nn_mod$nn_td_update(
+                model, optimizer,
+                lapply(pos, `[[`, "py_feat"),
+                lapply(pos, `[[`, "py_color"),
+                outcome, 0.1)
 
-        log_public_game(gn, outcome, length(move_history()), elapsed,
-                        result, build_pgn(move_san_log()))
+            session_nn_model(model)
+            .attrs  <- setNames(as.numeric(unlist(nn_result$attr_weights)), names(nn_result$attr_weights))
+            .deltas <- setNames(as.numeric(unlist(nn_result$deltas)),       names(nn_result$deltas))
+            session_nn_attrs(.attrs)
 
-        game_count_rv(game_count_rv() + 1L)
+            log_nn_game(run_id, gn, outcome, length(move_history()),
+                        elapsed, nn_result, build_pgn(move_san_log()), model)
+
+            result <- list(weights  = .attrs,
+                           deltas   = .deltas,
+                           td_error = as.numeric(nn_result$td_error),
+                           errors   = as.numeric(unlist(nn_result$position_errors)))
+        } else {
+            wv     <- session_weights()
+            result <- run_td_update(pos, outcome, wv,
+                lr             = 0.001,
+                draw_lr_scales = list(king_safety = 0.05, center_control = 0.2))
+            session_weights(result$weights)
+
+            log_linear_game(run_id, gn, outcome, length(move_history()),
+                            elapsed, result, build_pgn(move_san_log()))
+        }
+
+        # Update game count for this condition
+        gc <- game_counts()
+        gc[[active_condition()]] <- (gc[[active_condition()]] %||% 0L) + 1L
+        game_counts(gc)
 
         post_game_rv(list(
             result   = result,
@@ -505,13 +726,15 @@ server <- function(input, output, session) {
         sans <- move_san_log()
         n    <- length(sans)
         gr   <- game_result()
+        cond <- active_condition() %||% input$condition
+        suffix <- paste0(" \u2014 ", cond)
         if (!is.null(gr)) {
             label <- switch(gr, "1-0" = "White wins", "0-1" = "Black wins", "Draw")
-            return(paste0(label, if (n > 0) paste0(" \u2014 ", n, " moves") else ""))
+            return(paste0(label, if (n > 0) paste0(" \u2014 ", n, " moves") else "", suffix))
         }
-        if (n == 0) return("Your move \u2014 drag a piece to play")
+        if (n == 0) return(paste0("Your move \u2014 drag a piece to play", suffix))
         side <- if (current_board()$turn == chess_mod$WHITE) "White" else "Black"
-        paste0(side, " to move \u2014 move ", ceiling(n / 2) + (n %% 2))
+        paste0(side, " to move \u2014 move ", ceiling(n / 2) + (n %% 2), suffix)
     })
 
     output$move_list <- renderUI({
@@ -529,66 +752,74 @@ server <- function(input, output, session) {
                 tags$td(style = "padding:1px 6px 1px 0; font-family:monospace;",   blk)
             )
         })
-        div(style = paste("max-height:100px; overflow-y:auto;",
-                          "font-size:0.82em; border-top:1px solid #dee2e6;",
-                          "padding:4px 8px;"),
-            tags$table(style = "border-collapse:collapse;", do.call(tagList, rows))
-        )
+        div(style = "max-height:100px; overflow-y:auto; font-size:0.82em;
+                     border-top:1px solid #dee2e6; padding:4px 8px;",
+            tags$table(style = "border-collapse:collapse;", do.call(tagList, rows)))
     })
 
     output$fen_display <- renderText({ current_board()$fen() })
-
-    # ── Value boxes ───────────────────────────────────────────────────────
-
-    output$vb_status <- renderUI({
-        gr <- game_result()
-        if (!is.null(gr)) {
-            switch(gr, "1-0" = "White wins", "0-1" = "Black wins", "Draw")
-        } else if (game_active()) {
-            if (current_board()$turn == human_color()) "Your turn" else "Engine thinking\u2026"
-        } else "Start a game"
-    })
-
-    output$vb_eval <- renderUI({
-        req(length(eval_history()) > 0)
-        sprintf("%+.3f", tail(eval_history(), 1))
-    })
 
     # ── Diagnostics panel ──────────────────────────────────────────────────
 
     output$diag_header <- renderUI({
         if (!is.null(post_game_rv()))  "What the engine learned"
         else if (game_active())        "Live evaluation"
-        else                           "Engine weights"
+        else                           "Current engine weights"
     })
 
     output$diagnostics_panel <- renderUI({
         pg <- post_game_rv()
-        if (!is.null(pg))   return(uiOutput("post_game_panel"))
-        if (game_active())  return(uiOutput("live_panel"))
+        if (!is.null(pg))  return(uiOutput("post_game_panel"))
+        if (game_active()) return(uiOutput("live_panel"))
         uiOutput("weights_panel")
     })
 
-    # Weights panel (shown before first game)
+    # Weights panel (shown before first game) ----
     output$weights_panel <- renderUI({
-        card(
-            card_header("Current positional weights"),
-            tableOutput("weights_table")
+        cond <- input$condition
+        cfg  <- CONDITIONS[[cond]]
+        run_id <- cfg$run_id
+        tagList(
+            p(style = "padding:8px 12px 0; font-size:0.85em; color:#555;",
+              sprintf("Showing current weights for \u2018%s\u2019 (run %d).", cond, run_id)),
+            card(
+                card_header(if (cfg$is_nn) "Attribution weights (dV/dx\u1d62)" else "Positional weights"),
+                tableOutput("weights_table")
+            )
         )
     })
 
     output$weights_table <- renderTable({
-        wv <- session_weights()
+        cond <- input$condition
+        cfg  <- CONDITIONS[[cond]]
+        wv   <- if (cfg$is_nn) {
+            attrs <- session_nn_attrs()
+            if (is.null(attrs)) {
+                loaded <- tryCatch(load_latest_nn_model(cfg$run_id),
+                                   error = function(e) NULL)
+                if (!is.null(loaded))
+                    setNames(as.numeric(unlist(
+                        ENGINES[["engine_nn"]]$attribution_weights(loaded$model))),
+                        ENGINES[["engine_nn"]]$FEATURE_NAMES)
+                else
+                    setNames(numeric(0), character(0))
+            } else attrs
+        } else {
+            tryCatch(load_latest_weights(cfg$run_id), error = function(e) setNames(numeric(0), character(0)))
+        }
         tibble(Feature = names(wv), Weight = unname(wv)) |>
             arrange(desc(abs(Weight))) |>
-            mutate(Weight = round(Weight, 4))
+            mutate(Weight = round(Weight, 5))
     }, striped = TRUE, bordered = FALSE, small = TRUE)
 
-    # Live panel
+    # Live panel ----
     output$live_panel <- renderUI({
         tagList(
             card(
-                card_header("Position features \u00d7 weights"),
+                card_header(
+                    if (is_nn()) "Feature \u00d7 attribution (dV/dx\u1d62)"
+                    else         "Feature \u00d7 weight \u00d7 contribution"
+                ),
                 div(style = "max-height:240px; overflow-y:auto;",
                     tableOutput("feature_table"))
             ),
@@ -601,17 +832,30 @@ server <- function(input, output, session) {
 
     output$feature_table <- renderTable({
         req(game_active())
-        wp       <- session_weights()
-        feats_py <- engine_mod$extract_features(current_board())
+        feats_py <- active_engine_mod()$extract_features(current_board())
         feat_vec <- setNames(as.numeric(unlist(feats_py)), names(feats_py))
-        tibble(
-            Feature      = names(feat_vec),
-            Value        = feat_vec,
-            Weight       = wp[names(feat_vec)],
-            Contribution = feat_vec * wp[names(feat_vec)]
-        ) |>
-            arrange(desc(abs(Contribution))) |>
-            mutate(across(where(is.numeric), \(x) round(x, 4)))
+        if (is_nn()) {
+            attrs <- session_nn_attrs()
+            if (is.null(attrs)) attrs <- setNames(rep(0, length(feat_vec)), names(feat_vec))
+            tibble(
+                Feature     = names(feat_vec),
+                Value       = feat_vec,
+                Attribution = attrs[names(feat_vec)],
+                Sensitivity = feat_vec * attrs[names(feat_vec)]
+            ) |>
+                arrange(desc(abs(Sensitivity))) |>
+                mutate(across(where(is.numeric), \(x) round(x, 4)))
+        } else {
+            wp <- session_weights()
+            tibble(
+                Feature      = names(feat_vec),
+                Value        = feat_vec,
+                Weight       = wp[names(feat_vec)],
+                Contribution = feat_vec * wp[names(feat_vec)]
+            ) |>
+                arrange(desc(abs(Contribution))) |>
+                mutate(across(where(is.numeric), \(x) round(x, 4)))
+        }
     }, striped = TRUE, bordered = FALSE, small = TRUE)
 
     output$eval_trajectory <- renderPlot({
@@ -627,31 +871,36 @@ server <- function(input, output, session) {
             theme_minimal(base_size = 12)
     })
 
-    # Post-game panel
+    # Post-game panel ----
     output$post_game_panel <- renderUI({
         req(!is.null(post_game_rv()))
         tagList(
             uiOutput("pg_summary_boxes"),
             card(
-                card_header("What changed"),
-                plotOutput("pg_delta_chart", height = "220px")
+                card_header(
+                    if (is_nn()) "Attribution changes from this game"
+                    else         "Weight changes from this game"
+                ),
+                plotOutput("pg_delta_chart", height = "240px")
             )
         )
     })
 
     output$pg_summary_boxes <- renderUI({
-        pg <- post_game_rv()
+        pg  <- post_game_rv()
         req(!is.null(pg))
         outcome_label <- switch(pg$outcome,
             "1-0" = "White won", "0-1" = "Black won", "Draw")
         total_delta <- sum(abs(pg$result$deltas))
 
         layout_column_wrap(
-            width = 1/2, fill = FALSE,
-            value_box("Result",    outcome_label,
+            width = 1/3, fill = FALSE,
+            value_box("Result",       outcome_label,
                       theme = "primary",   showcase = bs_icon("trophy")),
+            value_box("TD error",     sprintf("%.4f", pg$td_error),
+                      theme = "secondary", showcase = bs_icon("lightning")),
             value_box("Total \u0394w", sprintf("%.4f", total_delta),
-                      theme = "secondary", showcase = bs_icon("arrow-left-right"))
+                      theme = "light",     showcase = bs_icon("arrow-left-right"))
         )
     })
 
@@ -666,7 +915,7 @@ server <- function(input, output, session) {
             geom_col(width = 0.6) +
             geom_vline(xintercept = 0, linewidth = 0.4, color = "grey40") +
             scale_fill_manual(values = c(pos = "#d4edda", neg = "#f8d7da"), guide = "none") +
-            labs(x = "\u0394w (weight change this game)", y = NULL) +
+            labs(x = "\u0394 this game", y = NULL) +
             theme_minimal(base_size = 12) +
             theme(panel.grid.major.y = element_blank())
     })

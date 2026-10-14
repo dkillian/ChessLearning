@@ -9,6 +9,11 @@ Minor changes within a run (e.g., tranche size, LR adjustment) continue the same
 
 | run_id | Date | Games | depth | lr | move_limit | weight_init | epsilon | Key Change |
 |--------|------|-------|-------|----|------------|-------------|---------|------------|
+| 22 | 2026-10-12 | 3 | 3 | 0.001 | — | seeded run_id=21 game_200 | N/A (human) | Human play; seeded from run_id=21 game 200; learnable material |
+| 23 | 2026-10-12 | ? | 3 | 0.001 | — | seeded run_id=21 game_240 | N/A (human) | Human play; seeded from run_id=21 game 240; learnable material |
+| 24 | 2026-10-13 | 100+ (overnight) | 3 | 0.001 | 200 | zero | 0.1 | **Neural net (MLP 19→32→1); TD(0)+Adam; pawn_advancement +0.120 at game 100; queen > rook material ordering corrected by game 100** |
+| 25 | 2026-10-13 | 1 | 3 | 0.001 | — | seeded run_id=24 game_0 (attribution weights) | N/A (human) | Accidental: old human play app seeded from NN attribution weights before NN support added; effectively zero-initialized linear run |
+| 26 | 2026-10-13 | 2+ | 3 | 0.001 | — | seeded run_id=24 game_10 | N/A (human) | **NN human play** (new NN-aware code); genuine PyTorch TD updates; ~3× larger parameter updates per halfmove than self-play |
 | 1 | 2026-09-29 | 200 | 2 | 0.001 | 200 | random | — | Verification run; baseline pipeline |
 | 2 | 2026-10-03 | 900 | 2 | 0.001→0.01 | 200 | random | — | Full run; diagnosed draw equilibrium; tested higher LR |
 | 3 | 2026-10-04 | 200 | 2 | 0.001 | 200 | canonical | — | Warm-start + removed `board.can_claim_draw()`; draws persisted via rook-shuffle repetition |
@@ -1196,3 +1201,64 @@ Deleted 14 duplicate weight rows from DB for run_id=19 game_number=1.
 2. **Run first 50-game tranche on neural net** — verify training loop, check feature attributions
 3. **Re-run Stockfish benchmark on run_id=21** — now without move limit for cleaner ELO estimate
 4. **Continue run_id=21 overnight** — target 2000+ total games before architecture decision
+
+---
+
+## Session 18 — October 13, 2026
+
+### Overview
+
+Major session: implemented the neural net engine condition end-to-end, ran the first 100 NN self-play games, added NN support to the human play and benchmark scripts, rebuilt the public app for multi-condition play, and deployed to shinyapps.io. Research purpose formally reframed from a 30-run reproducibility study to a broader investigation of how engines learn chess across conditions and architectures.
+
+### Key Findings
+
+**Neural net condition (run_id=24):**
+- Decisive rate: 44% (games 1–50) → **70%** (games 51–100) — fast improvement
+- Game length: 110 → 69 halfmoves (engine playing sharper)
+- **pawn_advancement positive at both game 50 (+0.101) and game 100 (+0.120)** — persistent correct sign; never achieved in any linear run at any game count
+- **Material ordering corrected to queen > rook by game 100** — linear learnable material (run_id=21) had rook > queen at 1050 games and never fixed it
+- Attribution weights at game 100: 13/19 correct signs
+- Attribution stability: dV/dx_i values differ by <0.002 across opening/midgame/endgame reference positions — validates attribution proxy methodology at this stage
+
+**Human vs NN (run_id=26):**
+- Human games cause **~3× larger parameter updates per halfmove** than self-play at equivalent training stage (0.0042 vs 0.0013 per halfmove)
+- Self-play learning decelerating fast: 0.141 → 0.047 Frobenius norm per game from games 10–50
+- Interpretation: human play introduces novel positions with higher TD surprise; structurally reduces the exploration collapse that self-play is prone to
+
+**Research reframe:** Project purpose is not a fixed 30-run reproducibility study but an open investigation of how chess engines learn — across different architectures (linear hardcoded material, linear learnable material, neural net), training regimes (self-play, human play, Stockfish teacher), and feature configurations. All conditions are first-class.
+
+### Scripts Added / Changed
+
+| File | Change |
+|---|---|
+| `scripts/python/engine_nn.py` | **New** — ChessNet MLP (19→32→1, tanh); `evaluate()`, `negamax()`, `get_best_move()`; `attribution_weights()` (dV/dx_i at starting position); `nn_td_update()` (R-friendly interface); `make_optimizer()`; `compute_baseline_norm()`; `model_to_b64()` / `model_from_b64()` for Supabase storage |
+| `scripts/python/selfplay_nn.ipynb` | **New** — TD(0)+Adam self-play training for NN condition; same DB schema as linear conditions; attribution weights logged instead of raw params |
+| `scripts/r/05_stockfish_benchmark.R` | Added `engine_nn` ENGINE_MODULE option; branches on NN: loads `.pt` file via `load_model()` instead of weights from DB |
+| `scripts/r/07_human_play.R` | **Major additions**: engine_nn option in ENGINES + UI; `session_nn_model`, `session_nn_optimizer`, `session_nn_attrs` reactives; `is_nn_engine()` / `get_engine_params()` helpers; NN-aware `record_position()`, `update_eval_history()`, `play_engine_move()`; NN New Game init (loads `.pt`, creates optimizer, creates run); NN `end_game()` (calls Python `nn_td_update()` via reticulate); `log_human_game_nn()` (saves `.pt` + logs attribution weights); post-game diagnostics: Frobenius norm value box, norm vs self-play baseline comparison, session norm history chart; NN-aware live feature table (attribution × value) |
+| `scripts/r/03_visualize.qmd` | Added "Stockfish Benchmark — ELO Estimates" section: ELO formula (display equation), flextable of all benchmark results, trajectory plot with 95% Wilson CI error bars |
+| `scripts/r/seed_supabase.R` | **New** — one-time script: creates `nn_models` table in Supabase; seeds run_id=2 (learnable material from local run_id=21) and run_id=3 (NN from local run_id=24) |
+| `public_app/app.R` | **Rewritten** — multi-condition support (2 conditions live: hardcoded material + learnable material); Supabase session pooler (IPv4, `aws-0-us-east-1.pooler.supabase.com`); condition selector UI; dynamic engine loading; separate linear/NN game paths; NN removed pending CPU-only torch solution |
+| `public_app/engine_learnable_material.py` | **New** — copy of learnable material engine for deployment |
+| `ChessLearningDocumentation.md` | Major update: brought current from Session 12 to Session 18; updated engine conditions, feature tables, weight state, file descriptions, open questions, key decisions |
+| `AGENTS.md` | Added `ChessLearningDocumentation.md` to session-end procedure (Step 4); renumbered subsequent steps |
+
+### Bugs Found / Fixed
+
+- **`07_human_play.R`**: `session_weights()` was NULL for NN sessions; `feature_table` and `play_engine_move()` tried to call `as.list(NULL)` → fixed via `get_engine_params()` helper
+- **`engine_nn.py` module caching**: `model_to_b64` added mid-session; module cached without it in R session → fixed via `importlib.reload()` in seeding script
+- **Public app IPv6**: shinyapps.io couldn't reach Supabase direct host (`db.*.supabase.co` resolved to IPv6) → switched to session pooler (`aws-0-us-east-1.pooler.supabase.com`, IPv4) with project-scoped username (`postgres.betniftrhjpeacfzjoym`)
+- **Public app Python crash (CUDA torch)**: `virtualenv_install(c("chess", "torch"))` on Linux installs CUDA torch (~554MB GPU packages) → removed NN condition from public app; only `chess` installed; NN deployment requires CPU-only torch solution
+- **Public app game start disconnect**: app still crashes when starting a game — not yet resolved; to debug next session
+
+### Overnight Job
+
+- **NN self-play run_id=24**: RESUME=True, N_GAMES=400 (targeting game 500 total); started ~10pm; should complete by ~8am
+- ELO benchmark for run_id=24 should be run after overnight completes
+
+### Steps for Next Session
+
+1. **Assess NN overnight run** — check decisive rate, attribution weights, pawn_advancement at ~500 games
+2. **Benchmark NN at game ~500** — `05_stockfish_benchmark.R` with ENGINE_MODULE=`"engine_nn"`, RUN_ID=24
+3. **Debug public app game-start disconnect** — check shinyapps.io logs; likely Python/reticulate issue on first game
+4. **CPU-only torch for public NN deployment** — explore `requirements.txt` with `--index-url https://download.pytorch.org/whl/cpu` or Posit Connect
+5. **Supabase `nn_models` table seeding** for run_id=3 already done; reseed after overnight run if weights improve meaningfully
