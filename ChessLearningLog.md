@@ -1204,6 +1204,55 @@ Deleted 14 duplicate weight rows from DB for run_id=19 game_number=1.
 
 ---
 
+## Session 19 — October 14, 2026
+
+### What We Worked On
+
+- Discussed ELO benchmark procedure for run_id=24 (neural net)
+- Reviewed activity documentation (ChessLearningDocumentation.md, ChessLearningLog.md)
+- Diagnosed and fixed the public app game-start crash
+- Redeployed public app to shinyapps.io
+
+### Key Findings
+
+**ELO benchmark for run_id=24:** `05_stockfish_benchmark.R` already has `RUN_ID=24` but `ENGINE_MODULE` is incorrectly set to `"engine_learnable_material"` — must be changed to `"engine_nn"` before running. CHECKPOINT=NULL (latest) and N_GAMES=20 are appropriate. Run as background job after changing ENGINE_MODULE.
+
+**Public app crash (game-start disconnect):**
+- Root cause: gray Shiny disconnect overlay on game start = uncaught R error in the `btn_new_game` observer
+- Primary culprit: `load_latest_weights()` called with no `tryCatch` — a Supabase connection failure propagated and killed the session
+- Secondary: `record_position(b)` was outside the `tryCatch` block in `play_engine_move()`, so a Python error there was also unhandled
+- Tertiary: `next_game_number()` and `log_linear_game()` in `end_game()` also lacked error handling
+
+### Bugs Fixed
+
+| File | Bug | Fix |
+|---|---|---|
+| `public_app/app.R` | `load_latest_weights()` in `btn_new_game` had no error handling — Supabase failure caused gray disconnect | Wrapped in `tryCatch`; falls back to zero weights + shows warning notification |
+| `public_app/app.R` | `record_position(b)` was outside the `tryCatch` block in `play_engine_move()` | Moved inside `tryCatch` |
+| `public_app/app.R` | `next_game_number()` in `end_game()` had no error handling | Wrapped in `tryCatch`; falls back to `1L` |
+| `public_app/app.R` | `log_linear_game()` in `end_game()` had no error handling | Wrapped in `tryCatch`; shows warning notification on failure |
+
+**Engine files confirmed identical** between `scripts/python/` and `public_app/` — no sync needed.
+
+### Deployment
+
+- Redeployed to https://dkillian.shinyapps.io/chess-learning/ via `rsconnect::deployApp()` with `appId=18172172`
+- Note: using `appName="ChessLearning"` (wrong) caused a 402 error (app limit); correct `appName="chess-learning"` with `appId` resolves this
+
+### Background Jobs at Session Close
+
+Both Stockfish benchmark jobs in RStudio Jobs pane: **succeeded** (completed earlier this session).
+No active self-play training jobs.
+
+### Steps for Next Session
+
+1. **Test the public app** — play a game at https://dkillian.shinyapps.io/chess-learning/; confirm game-start no longer disconnects; check if error notification appears (indicates DB issue worth diagnosing)
+2. **Run ELO benchmark for run_id=24** — change `ENGINE_MODULE <- "engine_nn"` on line 22 of `05_stockfish_benchmark.R`, then run as background job
+3. **Assess NN run status** — check what game number the overnight run reached; assess attribution weights, decisive rate, pawn_advancement
+4. **CPU-only torch for NN public deployment** — if game-start is now stable, consider adding NN condition via `requirements.txt` approach with `--index-url https://download.pytorch.org/whl/cpu`
+
+---
+
 ## Session 18 — October 13, 2026
 
 ### Overview

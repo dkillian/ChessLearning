@@ -531,19 +531,24 @@ server <- function(input, output, session) {
         active_condition(cond)
         active_run_id(run_id)
 
-        # Load latest shared weights / model for this condition
-        if (cfg$is_nn) {
-            nn_mod  <- ENGINES[["engine_nn"]]
-            loaded  <- load_latest_nn_model(run_id)
-            session_nn_model(loaded$model)
-            session_nn_optimizer(nn_mod$make_optimizer(loaded$model))
-            session_nn_attrs(NULL)
-            session_weights(NULL)
-        } else {
-            session_weights(load_latest_weights(run_id))
-            session_nn_model(NULL)
-            session_nn_optimizer(NULL)
-        }
+        # Load latest shared weights for this condition.
+        # On DB failure, fall back to zero weights so the game can still proceed.
+        wv <- tryCatch(
+            load_latest_weights(run_id),
+            error = function(e) {
+                showNotification(
+                    paste0("Could not load weights from database — using zero weights. ",
+                           "(", conditionMessage(e), ")"),
+                    type     = "warning",
+                    duration = 8
+                )
+                feat_names <- active_engine_mod()$FEATURE_NAMES
+                setNames(numeric(length(feat_names)), feat_names)
+            }
+        )
+        session_weights(wv)
+        session_nn_model(NULL)
+        session_nn_optimizer(NULL)
 
         col <- if (input$human_color == "White") chess_mod$WHITE else chess_mod$BLACK
         human_color(col)
@@ -637,8 +642,8 @@ server <- function(input, output, session) {
 
     play_engine_move <- function() {
         b <- current_board()
-        record_position(b)
         tryCatch({
+            record_position(b)
             mv  <- active_engine_mod()$get_best_move(b, get_engine_params(),
                                                       as.integer(input$depth), FALSE)[[1]]
             req(!is.null(mv))
@@ -670,7 +675,10 @@ server <- function(input, output, session) {
         if (length(pos) == 0) return()
 
         run_id   <- active_run_id()
-        gn       <- next_game_number(run_id)
+        gn       <- tryCatch(
+            next_game_number(run_id),
+            error = function(e) 1L
+        )
 
         if (is_nn()) {
             nn_mod    <- ENGINES[["engine_nn"]]
@@ -702,8 +710,16 @@ server <- function(input, output, session) {
                 draw_lr_scales = list(king_safety = 0.05, center_control = 0.2))
             session_weights(result$weights)
 
-            log_linear_game(run_id, gn, outcome, length(move_history()),
-                            elapsed, result, build_pgn(move_san_log()))
+            tryCatch(
+                log_linear_game(run_id, gn, outcome, length(move_history()),
+                                elapsed, result, build_pgn(move_san_log())),
+                error = function(e)
+                    showNotification(
+                        paste0("Game logged locally but database write failed: ",
+                               conditionMessage(e)),
+                        type = "warning", duration = 8
+                    )
+            )
         }
 
         # Update game count for this condition

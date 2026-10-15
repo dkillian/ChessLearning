@@ -114,6 +114,29 @@ Succeeded. Remote is now clean.
 
 ---
 
+## Session 19 — October 14, 2026
+
+### Commands
+
+```bash
+git add -A
+git commit -m "Session 19: fix public app game-start crash; add tryCatch to all DB calls; redeploy"
+git push
+```
+
+### Changes committed
+
+- `public_app/app.R` — wrapped `load_latest_weights()`, `record_position()`, `next_game_number()`, and `log_linear_game()` in `tryCatch`; game-start crash fixed
+- `ChessLearningLog.md` — Session 19 entry appended
+- `ChessLearningDocumentation.md` — status header updated to Session 19; public app file table updated
+- `AGENTS.md` — architecture header updated to Session 19; public app R scripts table updated with deployment command and engine file entries
+
+### Deployment note
+
+`deployApp(appName="ChessLearning")` returns 402 (app limit) because it tries to create a new app. Always use `appName="chess-learning"` with `appId=18172172L` to update the existing deployment.
+
+---
+
 ## Commit History
 
 | Hash | Date | Message |
@@ -122,5 +145,6 @@ Succeeded. Remote is now clean.
 | TBD | 2026-10-07 | Session 11: engine.py 14 features, softmax bug fixes, doc update, run_id=14 config |
 | `b3d9470` | earlier | Initial commit |
 | TBD | 2026-10-13 | Session 18: neural net engine condition, NN human play support, ELO viz, public app multi-condition deployment |
+| TBD | 2026-10-14 | Session 19: fix public app game-start crash; add tryCatch to all DB calls; redeploy |
 
 *(Intermediate "d" commits were rewritten by filter-branch and their SHAs changed.)*

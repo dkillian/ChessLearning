@@ -83,7 +83,7 @@ To start a session:
 
 ---
 
-## Current Architecture (as of Session 18)
+## Current Architecture (as of Session 19)
 
 ### Engine (`scripts/python/engine.py`) — v2
 - **14 learnable positional features** (material features removed entirely)
@@ -236,7 +236,9 @@ benchmark will use no move limit — chess rules only via claim_draw=True).
 | `scripts/r/06_search_mechanics.R` | Step-by-step walkthrough: board evaluation feature-by-feature, negamax depth-by-depth |
 | `scripts/r/06_stockfish_arena.R` | Shiny app — Live Game (engine vs Stockfish) and ELO Benchmark read-only viewer (polls DB every 30s); run benchmarks via `05_stockfish_benchmark.R` |
 | `scripts/r/07_human_play.R` | Shiny app — Human vs engine with real TD(0) weight updates and post-game learning diagnostics; v2-aware: auto-detects active v2 human run or creates one seeded from `SEED_RUN_ID`; logs `engine_version` and `human_color`. **Session 18:** full NN support — engine_nn option in UI; separate `session_nn_model` / `session_nn_optimizer` reactives; `nn_td_update()` via reticulate; `.pt` checkpoint saved after each human game; Frobenius norm diagnostics (value box, norm vs self-play baseline, session norm history chart); NN-aware live feature table |
-| `public_app/app.R` | Crowdsourced human-vs-engine Shiny app for shinyapps.io; Supabase PostgreSQL backend; chessboard.js drag-and-drop board; all public players share one evolving engine (PUBLIC_RUN_ID=1) |
+| `public_app/app.R` | Crowdsourced human-vs-engine Shiny app for shinyapps.io; Supabase PostgreSQL backend; two conditions (hardcoded material run_id=1, learnable material run_id=2); chessboard.js drag-and-drop board; all DB calls wrapped in tryCatch (game-start crash fixed Session 19). Deploy via `rsconnect::deployApp(appDir="public_app", appName="chess-learning", appId=18172172L, account="dkillian", server="shinyapps.io", forceUpdate=TRUE)` |
+| `public_app/engine.py` | Copy of `engine.py` (v2, hardcoded material) for deployment — confirmed identical to `scripts/python/engine.py` |
+| `public_app/engine_learnable_material.py` | Copy of `engine_learnable_material.py` for deployment — confirmed identical to `scripts/python/engine_learnable_material.py` |
 | `public_app/engine.py` | Copy of `engine.py` (v2) for deployment alongside `public_app/app.R` |
 
 ---

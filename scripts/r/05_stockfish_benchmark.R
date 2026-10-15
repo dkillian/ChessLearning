@@ -19,7 +19,7 @@ CHECKPOINT    <- NULL        # NULL = latest checkpoint; or set an integer game 
 ELO_LEVELS    <- 1320        # Stockfish ELO levels to test (minimum is 1320)
 N_GAMES       <- 20          # games per ELO level (even number = balanced colours)
 DEPTH         <- 3L          # search depth for our engine
-ENGINE_MODULE <- "engine_learnable_material"  # "engine" (runs 1-19) | "engine_learnable_material" (run 20+) | "engine_nn" (run 22+)
+ENGINE_MODULE <- "engine_nn" # "engine_learnable_material"  # "engine" (runs 1-19) | "engine_learnable_material" (run 20+) | "engine_nn" (run 22+)
 
 # ---- Setup ----
 

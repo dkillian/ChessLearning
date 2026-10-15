@@ -3,7 +3,7 @@
 **Activity**: Learning Study
 **Workspace**: Chess Learning
 **Initialized**: September 29, 2026
-**Status**: Active — Session 17; learnable material condition (run_id=21, 1050+ games); hardcoded material baseline through run_id=19; neural net engine planned next.
+**Status**: Active — Session 19; neural net condition (run_id=24, 100+ games overnight); learnable material (run_id=21, 1050 games); hardcoded material baseline through run_id=19; public app deployed and crash-fixed.
 
 ---
 
@@ -452,8 +452,9 @@ Chess Learning/                                  ← Repo root
 
 | File | Description |
 |---|---|
-| `public_app/app.R` | Crowdsourced human-vs-engine Shiny app for shinyapps.io. Supabase PostgreSQL backend. All public players share one evolving engine (PUBLIC_RUN_ID=1). Chessboard.js drag-and-drop board. |
+| `public_app/app.R` | Crowdsourced human-vs-engine Shiny app for shinyapps.io. Supabase PostgreSQL backend. Two conditions: hardcoded material (run_id=1) and learnable material (run_id=2). Chessboard.js drag-and-drop board. All DB calls wrapped in `tryCatch` — game-start crash fixed in Session 19. |
 | `public_app/engine.py` | Copy of `engine.py` (v2, hardcoded material) for deployment alongside `public_app/app.R`. |
+| `public_app/engine_learnable_material.py` | Copy of `engine_learnable_material.py` for deployment. |
 
 ---
 
