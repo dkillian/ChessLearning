@@ -3,7 +3,7 @@
 **Activity**: Learning Study
 **Workspace**: Chess Learning
 **Initialized**: September 29, 2026
-**Status**: Active — Session 19; neural net condition (run_id=24, 100+ games overnight); learnable material (run_id=21, 1050 games); hardcoded material baseline through run_id=19; public app deployed and crash-fixed.
+**Status**: Active — Session 20; neural net condition (run_id=24, 917 games, 15/19 correct signs, ELO ~1051 at game 544); learnable material (run_id=21, 1050 games, ELO ~1285); hardcoded material baseline through run_id=19; public app deployed and crash-fixed.
 
 ---
 
@@ -61,6 +61,7 @@ Two engine conditions are maintained as separate importable modules:
 |---|---|---|---|
 | **Hardcoded material** | `engine.py` / `engine_hardcoded_material.py` | 1–19 | 14 positional; material hard-coded via `PIECE_VALUES` |
 | **Learnable material** | `engine_learnable_material.py` | 20+ | 19 total (5 material + 14 positional); no hard-coded piece values |
+| **Neural net** | `engine_nn.py` | 24+ | Same 19 features as learnable material; MLP (19→32→1, tanh); attribution weights (dV/dx_i at starting position) logged instead of raw parameters |
 
 The learnable material condition replaces `knight_pst` with `knight_outpost` starting run_id=21.
 
@@ -185,6 +186,14 @@ Game phase is a midgame fraction [0, 1] computed by `_game_phase(board)` from we
 
 ## Current Weight State
 
+### run_id=24 (neural net MLP 19→32→1, TD(0)+Adam, 1005+ games — past-checkpoint opponent active from game 996; attribution weights at game 1005)
+
+Correct sign (17/19): pawn_advancement (+0.591), material_queen (+0.588), material_rook (+0.216), knight_outpost (+0.162), material_bishop (+0.124), mobility (+0.108), passed_pawn (+0.106), rook_seventh (+0.076), center_control (+0.059), rook_open_file (+0.058), material_knight (+0.054), material_pawn (+0.043), king_safety (+0.038), piece_development (+0.037), connected_rooks (+0.011), backward_pawn (+0.001), doubled_pawn (+0.001)
+
+Wrong sign (2/19): isolated_pawn (−0.004), bishop_pair (−0.057)
+
+**17/19 correct signs** — best result for the NN condition. Three features corrected in 10 games after past-checkpoint opponent introduced: `center_control`, `rook_open_file`, `connected_rooks` (all stuck wrong from game 200 to 994). Stockfish ELO declining: ~1079 (game 50) → ~1051 (game 544) → ~982 (game 900). ELO benchmark with past-opponent mechanism pending. Overnight tranche in progress from game 995.
+
 ### run_id=21 (learnable material, `knight_outpost`, 1050 games from zero — v2 sign convention: all positive correct)
 
 Correct sign (17/19): material_rook (+0.213), material_queen (+0.184), material_bishop (+0.112),
@@ -216,7 +225,7 @@ See `AGENTS.md` (Current Weight State section) for full weight tables for run_id
 |---|---|---|
 | Rules engine | Python (`python-chess`) | Legal move generation, game state |
 | Feature extractor | Python | Board → 14-feature (hardcoded material) or 19-feature (learnable material) named vector |
-| Evaluator | Python | Hard-coded material + weighted dot product (hardcoded cond.) or fully weighted dot product (learnable cond.) |
+| Evaluator | Python | Hard-coded material + weighted dot product (hardcoded cond.) or fully weighted dot product (learnable cond.) or MLP forward pass (neural net cond.) |
 | Search | Python | Negamax with alpha-beta pruning (depth=3) |
 | Self-play loop | Python | Plays games, logs outcomes |
 | TD learner | Python | TD(0) weight updates after each half-move |
@@ -352,6 +361,7 @@ Three active training notebooks, one per condition/variant:
 
 - `selfplay_td0.ipynb`: hardcoded material condition; TD(0), epsilon-greedy (runs 7–19)
 - `selfplay_learnable_material.ipynb`: learnable material condition; TD(0), epsilon-greedy (runs 20+)
+- `selfplay_nn.ipynb`: neural net condition; TD(0)+Adam; attribution weights logged (runs 24+)
 - `selfplay_softmax.ipynb`: variant — softmax move selection with temperature τ=0.05, style modifier presets
 
 Archived notebooks (v1 engine, prior runs):
@@ -381,9 +391,11 @@ Chess Learning/                                  ← Repo root
 │   │   ├── engine.py                            ← Hardcoded material engine (14 positional features)
 │   │   ├── engine_hardcoded_material.py         ← Archive copy of hardcoded material engine (runs 1–19)
 │   │   ├── engine_learnable_material.py         ← Learnable material engine (19 features; knight_outpost)
+│   │   ├── engine_nn.py                         ← Neural net engine (MLP 19→32→1, tanh; run 24+)
 │   │   ├── engine.ipynb                         ← Stage 01: documented notebook with verification
 │   │   ├── selfplay_td0.ipynb                   ← Stage 02: hardcoded material training (TD(0))
 │   │   ├── selfplay_learnable_material.ipynb    ← Stage 02: learnable material training (TD(0))
+│   │   ├── selfplay_nn.ipynb                    ← Stage 02: neural net training (TD(0)+Adam)
 │   │   ├── selfplay_softmax.ipynb               ← Stage 02 variant: softmax + style modifiers
 │   │   ├── selfplay_mc.ipynb                    ← Archive: Monte Carlo version (superseded)
 │   │   ├── selfplay_sf.ipynb                    ← Archive: Stockfish-teacher variant (not continued)
@@ -401,7 +413,8 @@ Chess Learning/                                  ← Repo root
 │       ├── 05_stockfish_benchmark.R             ← Parameterized: ELO benchmark (run as background job)
 │       ├── 06_search_mechanics.R                ← Step-by-step: board eval + negamax depth-by-depth
 │       ├── 06_stockfish_arena.R                 ← Shiny: Live Game viewer + ELO benchmark read-only viewer
-│       └── 07_human_play.R                      ← Shiny: human vs engine with live TD(0) updates
+│       ├── 07_human_play.R                      ← Shiny: human vs engine with live TD(0) updates
+│       └── seed_supabase.R                      ← One-time: creates nn_models table; seeds run_id=2 and run_id=3
 ├── public_app/
 │   ├── app.R                                    ← Crowdsourced human-vs-engine app (shinyapps.io)
 │   └── engine.py                                ← Copy of engine.py for deployment
@@ -422,9 +435,11 @@ Chess Learning/                                  ← Repo root
 | `scripts/python/engine.py` | Importable module (hardcoded material): 14-feature positional extractor, linear evaluator with hard-coded material (`PIECE_VALUES`), negamax search with alpha-beta, `_game_phase()` helper. Used by hardcoded-material training notebooks. |
 | `scripts/python/engine_hardcoded_material.py` | Archive copy of `engine.py` as of the hardcoded-material condition (runs 1–19). Preserved as a research artifact. |
 | `scripts/python/engine_learnable_material.py` | Learnable material engine: 19 features — 5 material + 14 positional. `knight_pst` replaced by `knight_outpost` (`_safe_knight_outpost()`) from run_id=21. No hard-coded piece values. |
+| `scripts/python/engine_nn.py` | Neural net engine (run 24+): ChessNet MLP (19→32→1, tanh); implements `evaluate()`, `negamax()`, `get_best_move()`, `attribution_weights()` (dV/dx_i at starting position), `nn_td_update()` (R-friendly interface for reticulate), `model_to_b64()` / `model_from_b64()` for Supabase storage. |
 | `scripts/python/engine.ipynb` | Stage 01 notebook: same content as `engine.py` (v2 architecture) with markdown explanations and 6 verification checks. |
 | `scripts/python/selfplay_td0.ipynb` | Primary training script (hardcoded material): `play_game`, `td_update` (TD(0)), `train`; epsilon-greedy; SQLite logging. Configure via `RUN_ID`, `DEPTH`, `RESUME`, `N_GAMES`. |
 | `scripts/python/selfplay_learnable_material.ipynb` | Training script (learnable material): same structure as `selfplay_td0.ipynb`; imports `engine_learnable_material`. Configure via `RUN_ID`, `DEPTH`, `RESUME`, `N_GAMES`. |
+| `scripts/python/selfplay_nn.ipynb` | Training script (neural net): TD(0)+Adam; imports `engine_nn`; logs attribution weights (dV/dx_i) to `weights` table instead of raw parameters. Same DB schema as linear conditions. Configure via `RUN_ID`, `DEPTH`, `RESUME`, `N_GAMES`. |
 | `scripts/python/selfplay_softmax.ipynb` | Variant training script: softmax move selection (τ=0.05, top-10 candidates), style modifier presets (neutral/attacking/cautious/reckless/positional). |
 | `scripts/python/selfplay_sf.ipynb` | Stockfish-teacher variant (not continued since run_id=16): plays against Stockfish at configurable ELO, TD(0) updates, built-in ELO estimation. Windows asyncio fix included. Retained for reference. |
 | `scripts/python/selfplay_mc.ipynb` | Archived Monte Carlo version of the self-play loop. Superseded by TD(0). Retained for reference. |
@@ -446,7 +461,8 @@ Chess Learning/                                  ← Repo root
 | `scripts/r/05_stockfish_benchmark.R` | Parameterized script: runs ELO benchmark vs Stockfish at configurable ELO; designed to run as an RStudio background job. `ENGINE_MODULE` config parameter selects engine condition (`"engine"` for runs 1–19, `"engine_learnable_material"` for run 20+). No move limit — games play to natural conclusion under chess rules only (`claim_draw=True`). Writes to `stockfish_evals` and `stockfish_games` tables. |
 | `scripts/r/06_search_mechanics.R` | Step-by-step R walkthrough: board evaluation feature-by-feature (feature × weight contribution table), negamax depth-by-depth from depth=0 through depth=3. |
 | `scripts/r/06_stockfish_arena.R` | Shiny app: Live Game tab (engine vs Stockfish, real-time board) and ELO Benchmark tab (read-only viewer polling DB every 30s). Run benchmarks via `05_stockfish_benchmark.R`. |
-| `scripts/r/07_human_play.R` | Shiny app: human vs engine with real TD(0) weight updates; engine/run/checkpoint selection menu; live diagnostics (feature × weight table, evaluation trajectory); post-game analysis (weight delta chart, top-3 learning moments). v2-aware: auto-detects active v2 human run or creates one seeded from `SEED_RUN_ID`. Logs `engine_version` and `human_color`. |
+| `scripts/r/07_human_play.R` | Shiny app: human vs engine with real TD(0) weight updates; engine/run/checkpoint selection menu; live diagnostics (feature × weight table, evaluation trajectory); post-game analysis (weight delta chart, top-3 learning moments). v2-aware: auto-detects active v2 human run or creates one seeded from `SEED_RUN_ID`. Logs `engine_version` and `human_color`. NN-aware: separate `session_nn_model`/optimizer reactives, `nn_td_update()` via reticulate, `.pt` checkpoint saved after each game, Frobenius norm diagnostics. |
+| `scripts/r/seed_supabase.R` | One-time seeding script: creates `nn_models` table in Supabase; seeds run_id=2 (learnable material from local run_id=21) and run_id=3 (NN from local run_id=24). Safe to re-run. |
 
 ### Public App
 
@@ -476,22 +492,23 @@ Chess Learning/                                  ← Repo root
 | Background job for Stockfish benchmark | Prevents Shiny session blocking; arena app is now read-only (polls DB every 30s) |
 | No move limit in benchmark | 80 half-move cap distorted 60% of run_id=21 benchmark games into draws; removed in Session 17 |
 | `knight_pst` → `knight_outpost` (learnable material) | PST approach generated 75.8% wrong-direction TD updates because centralized knights were frequently captured at depth=3; safe outpost definition avoids this |
-| One engine module per condition | Engine files are first-class research artifacts; `engine.py`, `engine_hardcoded_material.py`, `engine_learnable_material.py` maintained separately |
+| One engine module per condition | Engine files are first-class research artifacts; `engine.py`, `engine_hardcoded_material.py`, `engine_learnable_material.py`, `engine_nn.py` maintained separately |
 | v2 sign convention: all features positive | Penalty features negated in `extract_features()` — cleaner to assess, fewer sign-tracking errors |
+| Neural net as third condition (Session 18) | MLP (19→32→1, tanh) with same 19 features as learnable material; same DB schema; attribution weights (dV/dx_i) logged in place of raw parameters; enables direct linear vs nonlinear comparison across the same feature set |
+| Research reframe (Session 18) | Project scope expanded from a fixed 30-run reproducibility study to an open investigation of how chess engines learn across architectures (hardcoded material, learnable material, neural net), training regimes (self-play, human play, Stockfish teacher), and feature configurations |
 
 ---
 
 ## Open Questions
 
-- Why do `doubled_pawn` and `pawn_advancement` show wrong signs persistently across runs (including run_id=21)?
-  - `doubled_pawn`: magnitude asymmetry — 54% of updates are correct-direction but a fat negative tail overwhelms; near-random walk behavior
-  - `pawn_advancement`: frequency bias — 61% of updates are negative; credit assignment problem where advanced pawns lead to exchanges the engine mis-evaluates
-- Is the architecture ready for the 30-run experimental design? Under the hardcoded material condition, run_id=14 (11/14, ELO ~1390) and run_id=18 (11/14, ELO ~1355) are candidate baselines. The 2 remaining wrong-sign features may reflect irreducible feature-design limitations rather than insufficient training.
-- Will the learnable material condition close the ELO gap to the hardcoded material baseline (~1355) with more training? run_id=21 at ~1285 ELO suggests material weights haven't fully converged.
-- Can a neural net engine (MLP with same 19 features, PyTorch) outperform the linear evaluator? Planned as the next development phase.
-- Does the sequence of concept acquisition in the learnable material condition differ from the hardcoded material condition? If so, which concepts shift in order?
+- Why do `doubled_pawn` and `pawn_advancement` show wrong signs persistently in linear runs?
+  - `doubled_pawn`: magnitude asymmetry — 54% of updates are correct-direction but a fat negative tail overwhelms; near-random walk. Corrected by the neural net (+0.032 at game 910).
+  - `pawn_advancement`: frequency bias — 61% of updates are negative in linear runs; credit assignment problem. Neural net resolves this: top feature at +0.541 by game 910.
+- Why does the neural net (run_id=24, 15/19 correct signs, pawn_advancement resolved) show significantly lower Stockfish ELO (~1051 at game 544) than the linear hardcoded-material engine (~1355)? Possible causes: self-play position distribution overfitting, attribution proxy limitations (dV/dx_i ≠ actual internal weights), or architectural issues still under investigation.
+- Will the learnable material condition (run_id=21, ELO ~1285) close the ELO gap to the hardcoded material baseline (~1355) with more training?
+- Does the sequence of concept acquisition differ across the three conditions (hardcoded material, learnable material, neural net)?
 - What threshold defines concept "emergence"? (Calibration in progress.)
-- Does human game signal improve wrong-sign feature correction beyond self-play alone? run_id=17 and 19 maintained 11/14 correct signs but did not correct persistent wrong-sign features.
+- Does human game signal improve wrong-sign feature correction? Runs 17, 19, and 26 show higher TD surprise but have not corrected persistent wrong-sign features so far.
 
 ---
 

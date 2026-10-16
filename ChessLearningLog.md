@@ -11,7 +11,7 @@ Minor changes within a run (e.g., tranche size, LR adjustment) continue the same
 |--------|------|-------|-------|----|------------|-------------|---------|------------|
 | 22 | 2026-10-12 | 3 | 3 | 0.001 | — | seeded run_id=21 game_200 | N/A (human) | Human play; seeded from run_id=21 game 200; learnable material |
 | 23 | 2026-10-12 | ? | 3 | 0.001 | — | seeded run_id=21 game_240 | N/A (human) | Human play; seeded from run_id=21 game 240; learnable material |
-| 24 | 2026-10-13 | 100+ (overnight) | 3 | 0.001 | 200 | zero | 0.1 | **Neural net (MLP 19→32→1); TD(0)+Adam; pawn_advancement +0.120 at game 100; queen > rook material ordering corrected by game 100** |
+| 24 | 2026-10-13 | 917 | 3 | 0.001 | 200 | zero | 0.1 | **Neural net (MLP 19→32→1); TD(0)+Adam; 15/19 correct signs at game 910; pawn_advancement top feature (+0.541); 68.4% decisive; ELO ~1051 at game 544 (below linear baseline)** |
 | 25 | 2026-10-13 | 1 | 3 | 0.001 | — | seeded run_id=24 game_0 (attribution weights) | N/A (human) | Accidental: old human play app seeded from NN attribution weights before NN support added; effectively zero-initialized linear run |
 | 26 | 2026-10-13 | 2+ | 3 | 0.001 | — | seeded run_id=24 game_10 | N/A (human) | **NN human play** (new NN-aware code); genuine PyTorch TD updates; ~3× larger parameter updates per halfmove than self-play |
 | 1 | 2026-09-29 | 200 | 2 | 0.001 | 200 | random | — | Verification run; baseline pipeline |
@@ -1204,55 +1204,6 @@ Deleted 14 duplicate weight rows from DB for run_id=19 game_number=1.
 
 ---
 
-## Session 19 — October 14, 2026
-
-### What We Worked On
-
-- Discussed ELO benchmark procedure for run_id=24 (neural net)
-- Reviewed activity documentation (ChessLearningDocumentation.md, ChessLearningLog.md)
-- Diagnosed and fixed the public app game-start crash
-- Redeployed public app to shinyapps.io
-
-### Key Findings
-
-**ELO benchmark for run_id=24:** `05_stockfish_benchmark.R` already has `RUN_ID=24` but `ENGINE_MODULE` is incorrectly set to `"engine_learnable_material"` — must be changed to `"engine_nn"` before running. CHECKPOINT=NULL (latest) and N_GAMES=20 are appropriate. Run as background job after changing ENGINE_MODULE.
-
-**Public app crash (game-start disconnect):**
-- Root cause: gray Shiny disconnect overlay on game start = uncaught R error in the `btn_new_game` observer
-- Primary culprit: `load_latest_weights()` called with no `tryCatch` — a Supabase connection failure propagated and killed the session
-- Secondary: `record_position(b)` was outside the `tryCatch` block in `play_engine_move()`, so a Python error there was also unhandled
-- Tertiary: `next_game_number()` and `log_linear_game()` in `end_game()` also lacked error handling
-
-### Bugs Fixed
-
-| File | Bug | Fix |
-|---|---|---|
-| `public_app/app.R` | `load_latest_weights()` in `btn_new_game` had no error handling — Supabase failure caused gray disconnect | Wrapped in `tryCatch`; falls back to zero weights + shows warning notification |
-| `public_app/app.R` | `record_position(b)` was outside the `tryCatch` block in `play_engine_move()` | Moved inside `tryCatch` |
-| `public_app/app.R` | `next_game_number()` in `end_game()` had no error handling | Wrapped in `tryCatch`; falls back to `1L` |
-| `public_app/app.R` | `log_linear_game()` in `end_game()` had no error handling | Wrapped in `tryCatch`; shows warning notification on failure |
-
-**Engine files confirmed identical** between `scripts/python/` and `public_app/` — no sync needed.
-
-### Deployment
-
-- Redeployed to https://dkillian.shinyapps.io/chess-learning/ via `rsconnect::deployApp()` with `appId=18172172`
-- Note: using `appName="ChessLearning"` (wrong) caused a 402 error (app limit); correct `appName="chess-learning"` with `appId` resolves this
-
-### Background Jobs at Session Close
-
-Both Stockfish benchmark jobs in RStudio Jobs pane: **succeeded** (completed earlier this session).
-No active self-play training jobs.
-
-### Steps for Next Session
-
-1. **Test the public app** — play a game at https://dkillian.shinyapps.io/chess-learning/; confirm game-start no longer disconnects; check if error notification appears (indicates DB issue worth diagnosing)
-2. **Run ELO benchmark for run_id=24** — change `ENGINE_MODULE <- "engine_nn"` on line 22 of `05_stockfish_benchmark.R`, then run as background job
-3. **Assess NN run status** — check what game number the overnight run reached; assess attribution weights, decisive rate, pawn_advancement
-4. **CPU-only torch for NN public deployment** — if game-start is now stable, consider adding NN condition via `requirements.txt` approach with `--index-url https://download.pytorch.org/whl/cpu`
-
----
-
 ## Session 18 — October 13, 2026
 
 ### Overview
@@ -1311,3 +1262,114 @@ Major session: implemented the neural net engine condition end-to-end, ran the f
 3. **Debug public app game-start disconnect** — check shinyapps.io logs; likely Python/reticulate issue on first game
 4. **CPU-only torch for public NN deployment** — explore `requirements.txt` with `--index-url https://download.pytorch.org/whl/cpu` or Posit Connect
 5. **Supabase `nn_models` table seeding** for run_id=3 already done; reseed after overnight run if weights improve meaningfully
+
+---
+
+## Session 19 — October 14, 2026
+
+### What We Worked On
+
+- Discussed ELO benchmark procedure for run_id=24 (neural net)
+- Reviewed activity documentation (ChessLearningDocumentation.md, ChessLearningLog.md)
+- Diagnosed and fixed the public app game-start crash
+- Redeployed public app to shinyapps.io
+
+### Key Findings
+
+**ELO benchmark for run_id=24:** `05_stockfish_benchmark.R` already had `RUN_ID=24` but `ENGINE_MODULE` was incorrectly set to `"engine_learnable_material"` — corrected to `"engine_nn"`. CHECKPOINT=NULL (latest) and N_GAMES=20 are appropriate.
+
+**Public app crash (game-start disconnect):**
+- Root cause: gray Shiny disconnect overlay on game start = uncaught R error in the `btn_new_game` observer
+- Primary culprit: `load_latest_weights()` called with no `tryCatch` — a Supabase connection failure propagated and killed the session
+- Secondary: `record_position(b)` was outside the `tryCatch` block in `play_engine_move()`, so a Python error there was also unhandled
+- Tertiary: `next_game_number()` and `log_linear_game()` in `end_game()` also lacked error handling
+
+### Bugs Fixed
+
+| File | Bug | Fix |
+|---|---|---|
+| `public_app/app.R` | `load_latest_weights()` in `btn_new_game` had no error handling — Supabase failure caused gray disconnect | Wrapped in `tryCatch`; falls back to zero weights + shows warning notification |
+| `public_app/app.R` | `record_position(b)` was outside the `tryCatch` block in `play_engine_move()` | Moved inside `tryCatch` |
+| `public_app/app.R` | `next_game_number()` in `end_game()` had no error handling | Wrapped in `tryCatch`; falls back to `1L` |
+| `public_app/app.R` | `log_linear_game()` in `end_game()` had no error handling | Wrapped in `tryCatch`; shows warning notification on failure |
+
+**Engine files confirmed identical** between `scripts/python/` and `public_app/` — no sync needed.
+
+### Deployment
+
+- Redeployed to https://dkillian.shinyapps.io/chess-learning/ via `rsconnect::deployApp()` with `appId=18172172`
+- Note: using `appName="ChessLearning"` (wrong) caused a 402 error (app limit); correct `appName="chess-learning"` with `appId` resolves this
+
+### Background Jobs at Session Close
+
+Both Stockfish benchmark jobs in RStudio Jobs pane: **succeeded** (completed earlier this session).
+No active self-play training jobs.
+
+### Steps for Next Session
+
+1. **Test the public app** — play a game at https://dkillian.shinyapps.io/chess-learning/; confirm game-start no longer disconnects; check if error notification appears (indicates DB issue worth diagnosing)
+2. **Run ELO benchmark for run_id=24** — `ENGINE_MODULE` now set correctly to `"engine_nn"`; run as background job
+3. **Assess NN run status** — check what game number the overnight run reached; assess attribution weights, decisive rate, pawn_advancement
+4. **CPU-only torch for NN public deployment** — if game-start is now stable, consider adding NN condition via `requirements.txt` approach with `--index-url https://download.pytorch.org/whl/cpu`
+
+---
+
+## Session 20 — October 15, 2026
+
+### What We Worked On
+
+- Reviewed activity documentation (`ChessLearningDocumentation.md`, `ChessLearningLog.md`)
+- Ran status queries on the SQLite database
+- Discovered run_id=24 reached **994+ games** (far beyond 500-game overnight target) and reviewed all four Stockfish benchmarks
+- Discussed self-play collapse diagnosis and DeepMind / AlphaGo Zero solutions
+- Implemented **past-checkpoint opponent mechanism** in `selfplay_nn.ipynb`
+- Ran 10-game test tranche (games 996–1005) to verify the mechanism
+- Updated all documentation files
+- Initiated overnight tranche with past-opponent mechanism active
+
+### Key Findings
+
+**run_id=24 Stockfish benchmark trajectory — ELO is declining with training:**
+
+| Checkpoint | W/L/D | ELO est. |
+|---|---|---|
+| Game 50 | 0/12/8 | ~1079 |
+| Game 380 | 2/14/4 | ~1079 |
+| Game 544 | 1/14/5 | ~1051 |
+| Game 900 | 1/16/3 | ~982 |
+
+ELO declining despite attribution metrics improving — classic self-play collapse. Network is overfitting to its own game distribution. Discussed AlphaGo Zero's solutions: MCTS training targets, past-checkpoint opponent pools, large replay buffer.
+
+**Past-checkpoint opponent mechanism (implemented this session):**
+- `play_game()` gains `opponent_model=None` parameter; learner randomly assigned WHITE or BLACK
+- Positions returned as `(features, color, is_learner)` 3-tuples
+- `td_update()` skips gradient updates on opponent positions but uses them as bootstrap targets
+- `train()` gains `past_opponent_freq` and `past_opponent_checkpoints` params; loads `.pt` files once before loop
+- Config: `PAST_OPPONENT_FREQ = 0.2`, `PAST_OPPONENT_CHECKPOINTS = [100, 200]`
+
+**10-game test tranche (games 996–1005) — promising early signal:**
+- **17/19 correct signs** at game 1005 — up from 15/19 at game 910 (had been stuck at 15/19 since game 200)
+- Three persistent wrong-sign features corrected: `center_control` (−0.017 → +0.059), `rook_open_file` (−0.030 → +0.058), `connected_rooks` (−0.023 → +0.011)
+- Still wrong: `bishop_pair` (−0.057), `isolated_pawn` (−0.004, borderline)
+- Decisive rate: 50% (5/10) — down from 78% in pre-patch games 946–995; likely noise at n=10 but worth monitoring
+- Weight changes are large (past-opponent games generate stronger TD signals than self-play, same effect as human play)
+
+### Scripts Changed
+
+| File | Change |
+|---|---|
+| `scripts/python/selfplay_nn.ipynb` | Implemented past-checkpoint opponent: `play_game()`, `td_update()`, `log_feature_stats()`, `log_position_logs()`, `train()`, config cell all updated |
+
+### Overnight Job
+
+- **NN self-play run_id=24**: RESUME=True, N_GAMES=250, PAST_OPPONENT_FREQ=0.2, checkpoints [100, 200]; started ~11pm
+- Latest model before overnight: `nn_run_24_game_994.pt`; overnight will resume from game 995+
+- Both checkpoint files confirmed present: `nn_run_24_game_100.pt`, `nn_run_24_game_200.pt`
+
+### Steps for Next Session
+
+1. **Assess overnight results** — check decisive rate, sign correctness, whether 17/19 holds after 250 more games
+2. **Run ELO benchmark on game 1005+ checkpoint** — real test of whether past-opponent mechanism improves external playing strength
+3. **Build `selfplay_sf_nn.ipynb`** — Stockfish teacher for the NN condition; mirrors `selfplay_nn.ipynb` but plays vs Stockfish at ELO 1320; TD(0)+Adam updates from those games
+4. **Play human games** via `07_human_play.R` with NN engine to inject novel positions
+5. **Reseed Supabase** — run `seed_supabase.R` to update run_id=3 (NN) with latest weights after overnight

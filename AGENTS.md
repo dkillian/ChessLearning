@@ -133,7 +133,7 @@ Applied to: `king_safety` (× phase), `mobility` (× (0.5+0.5×phase)), `pawn_ad
 | 21 | 1050+ | 3 | **`knight_outpost`** replaces `knight_pst`; learnable material; from zero | **17/19 correct signs** at game 1050; material ordering correct (rook > queen > bishop > knight > pawn); benchmark 3W/5L/12D vs SF1320 (~1285 ELO); black asymmetry 1.10:1 (best in learnable-material runs) |
 | 22 | 3 | 3 | Human play; seeded run_id=21 game_200; learnable material | — |
 | 23 | ? | 3 | Human play; seeded run_id=21 game_240; learnable material | — |
-| 24 | 100+ (overnight) | 3 | **Neural net** (MLP 19→32→1); TD(0)+Adam; `selfplay_nn.ipynb`; from zero | **13/19 correct signs at game 100; pawn_advancement +0.120 (positive — never achieved in linear); queen > rook material ordering corrected by game 100; 70% decisive (games 51–100)** |
+| 24 | 1005+ | 3 | **Neural net** (MLP 19→32→1); TD(0)+Adam; `selfplay_nn.ipynb`; past-checkpoint opponent added Session 20 | **17/19 correct signs at game 1005; ELO ~982 at game 900 (declining — self-play collapse); pawn_advancement top feature (+0.591); past-opponent mechanism corrected 3 stuck features in 10 games** |
 | 25 | 1 | 3 | Human play (accidental); seeded from NN run_id=24 game_0 attribution weights; linear TD update (old code) | Near-zero-initialized linear run; not meaningful |
 | 26 | 2+ | 3 | **NN human play** (new NN-aware code); seeded from run_id=24 game_10 | Genuine PyTorch TD updates; ~3× larger parameter updates per halfmove than self-play |
 
@@ -169,10 +169,10 @@ Note: material weights plateaued early; rook (0.186) still exceeds queen (0.116)
 Benchmark: 2W/4L/14D vs SF1320 — estimated ELO ~1285 (~70 pts below hardcoded-material baseline).
 `knight_pst` replaced by `knight_outpost` in engine_learnable_material.py; run_id=21 started from zero.
 
-**run_id=24 (neural net MLP 19→32→1, TD(0)+Adam, 100 games from zero — v2 sign convention: all positive correct; attribution weights = dV/dx_i at starting position):**
-Correct sign (13/19): material_queen (+0.401), mobility (+0.264), material_rook (+0.261), material_bishop (+0.177), pawn_advancement (+0.120), piece_development (+0.108), material_knight (+0.093), rook_seventh (+0.075), material_pawn (+0.048), passed_pawn (+0.044), isolated_pawn (+0.026), knight_outpost (+0.024), center_control (+0.010)
-Wrong sign (6/19): bishop_pair (−0.121), backward_pawn (−0.073), connected_rooks (−0.047), doubled_pawn (−0.028), king_safety (−0.020), rook_open_file (−0.007)
-Note: pawn_advancement correctly positive (never achieved in any linear run); material ordering queen > rook corrected by game 100 (linear learnable material never achieved this at 1050 games). Overnight run in progress targeting game 500.
+**run_id=24 (neural net MLP 19→32→1, TD(0)+Adam, 1005+ games — past-checkpoint opponent active from game 996; attribution weights = dV/dx_i at starting position; game 1005 checkpoint):**
+Correct sign (17/19): pawn_advancement (+0.591), material_queen (+0.588), material_rook (+0.216), knight_outpost (+0.162), material_bishop (+0.124), mobility (+0.108), passed_pawn (+0.106), rook_seventh (+0.076), center_control (+0.059), rook_open_file (+0.058), material_knight (+0.054), material_pawn (+0.043), king_safety (+0.038), piece_development (+0.037), connected_rooks (+0.011), backward_pawn (+0.001), doubled_pawn (+0.001)
+Wrong sign (2/19): isolated_pawn (−0.004), bishop_pair (−0.057)
+Note: 17/19 is the best sign count for the NN in any run. Three features corrected in 10 games after past-opponent mechanism introduced (center_control, rook_open_file, connected_rooks — all had been stuck wrong since game 200). Stockfish ELO ~982 at game 900 (declining trend: 1079→1079→1051→982). ELO benchmark post-mechanism pending. Overnight tranche in progress.
 
 **run_id=21 (learnable material, knight_outpost replaces knight_pst, 1050 games from zero — v2 sign convention: all positive correct):**
 Correct sign (17/19): material_rook (+0.213), material_queen (+0.184), material_bishop (+0.112),
@@ -212,6 +212,8 @@ benchmark will use no move limit — chess rules only via claim_draw=True).
 | `scripts/python/engine.py` | Importable module: 14-feature positional extractor (v2), linear evaluator with hard-coded material, negamax search with alpha-beta, `_game_phase()` helper |
 | `scripts/python/engine_hardcoded_material.py` | Archive of hardcoded-material engine condition (runs 1–19): 14 positional features, material hard-coded |
 | `scripts/python/engine_learnable_material.py` | Learnable-material engine condition (run 20+): 19 features — 5 material + 14 positional; no hard-coded piece values. **Session 16:** `knight_pst` replaced by `knight_outpost` (`_safe_knight_outpost()` — knights in opponent's half not attacked by opponent pawns) |
+| `scripts/python/engine_nn.py` | Neural net engine (run 24+): ChessNet MLP (19→32→1, tanh); `evaluate()`, `negamax()`, `get_best_move()`, `attribution_weights()` (dV/dx_i at starting position), `nn_td_update()` (R-friendly interface for reticulate), `model_to_b64()` / `model_from_b64()` for Supabase storage |
+| `scripts/python/selfplay_nn.ipynb` | TD(0)+Adam self-play training for NN condition; same DB schema as linear conditions; attribution weights logged instead of raw params; current runs: 24 |
 | `scripts/python/selfplay_td0.ipynb` | TD(0) self-play training; epsilon-greedy; v2 engine; current runs: 18 |
 | `scripts/python/selfplay_learnable_material.ipynb` | TD(0) self-play training; learnable material condition; imports `engine_learnable_material`; current runs: 20 |
 | `scripts/python/selfplay_softmax.ipynb` | TD(0) self-play; softmax move selection (τ=0.05, top-10); current runs: 15 |

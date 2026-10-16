@@ -146,5 +146,6 @@ git push
 | `b3d9470` | earlier | Initial commit |
 | TBD | 2026-10-13 | Session 18: neural net engine condition, NN human play support, ELO viz, public app multi-condition deployment |
 | TBD | 2026-10-14 | Session 19: fix public app game-start crash; add tryCatch to all DB calls; redeploy |
+| TBD | 2026-10-15 | Session 20: past-checkpoint opponent mechanism; doc updates; run_id=24 self-play collapse diagnosed |
 
 *(Intermediate "d" commits were rewritten by filter-branch and their SHAs changed.)*
