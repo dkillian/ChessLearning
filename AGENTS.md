@@ -78,12 +78,12 @@ To start a session:
 
 - **Python**: `python-chess` for rules; custom engine for feature extraction, minimax search, TD learning
 - **R**: `tidyverse`, `DBI`, `RSQLite` for visualization and analysis
-- **Storage**: SQLite database at `data/chess_learning.db` — 10 tables (runs, games, game_records, weights, weight_deltas, feature_stats, position_logs, baseline_evals, stockfish_evals, stockfish_games); `stockfish_games` created by `05_stockfish_benchmark.R`, not by `setup_database()`
+- **Storage**: SQLite database at `data/chess_learning.db` — 10 tables (runs, games, game_records, weights, weight_deltas, feature_stats, position_logs, baseline_evals, stockfish_evals, stockfish_games); `stockfish_games` created by `05_stockfish_benchmark.R`, not by `setup_database()`. **Session 21:** `games` and `stockfish_games` gained `seed_run_id INTEGER` and `seed_game_number INTEGER` columns to track which checkpoint each game was played against.
 - **Stockfish 19**: installed via winget; used for ELO benchmarking and live game play; minimum `UCI_Elo` = 1320
 
 ---
 
-## Current Architecture (as of Session 19)
+## Current Architecture (as of Session 21)
 
 ### Engine (`scripts/python/engine.py`) — v2
 - **14 learnable positional features** (material features removed entirely)
@@ -135,7 +135,27 @@ Applied to: `king_safety` (× phase), `mobility` (× (0.5+0.5×phase)), `pawn_ad
 | 23 | ? | 3 | Human play; seeded run_id=21 game_240; learnable material | — |
 | 24 | 1005+ | 3 | **Neural net** (MLP 19→32→1); TD(0)+Adam; `selfplay_nn.ipynb`; past-checkpoint opponent added Session 20 | **17/19 correct signs at game 1005; ELO ~982 at game 900 (declining — self-play collapse); pawn_advancement top feature (+0.591); past-opponent mechanism corrected 3 stuck features in 10 games** |
 | 25 | 1 | 3 | Human play (accidental); seeded from NN run_id=24 game_0 attribution weights; linear TD update (old code) | Near-zero-initialized linear run; not meaningful |
-| 26 | 2+ | 3 | **NN human play** (new NN-aware code); seeded from run_id=24 game_10 | Genuine PyTorch TD updates; ~3× larger parameter updates per halfmove than self-play |
+| 26 | 5 | 3 | **NN human play** (new NN-aware code); seeded from run_id=24 game_10 | Signs volatile: 14→11→15/19 across games 3–5; per-game seed not recorded in DB (gap now fixed) |
+| 27 | 640 | 3 | **SF teacher** (`selfplay_sf_nn.ipynb`); TD(0)+Adam; fresh start | ELO ~1105 at games 110 & 390 (above run 24 peak); slipped to 1079 at game 440; material_queen +0.442; signs volatile 11–18/19 (peaked game 340) |
+| 28 | 10 | 3 | **Self-play v2** (`selfplay_nn_v2.ipynb`); AdamW + LR schedule + resignation | 11/19 signs; 50% draw rate (expected, fresh model); no resignations |
+| 29 | 10 | 3 | **SF teacher v2** (`selfplay_sf_nn_v2.ipynb`); AdamW + LR schedule + temperature + resignation | 12/19 signs at game 10 (vs run 27's 17/19); weaker start attributed to near-uniform temperature on fresh model |
+
+### engine_nn_v2.py — Stage 2–5 Engine (Session 21)
+
+**Location:** `scripts/python/engine_nn_v2.py`
+
+| Component | Description |
+|---|---|
+| `board_to_tensor(board)` | 768-dim float tensor: 12 piece planes × 64 squares; always White's perspective (flips if Black to move) |
+| `MCTSNode` | PUCT UCB: Q + c_puct × P × √N_parent / (1 + N); root pre-expanded before simulation loop |
+| `mcts_search(board, net, ...)` | `board_to_input` param: defaults to `board_to_tensor`; pass custom fn for Stage 2 (19 features) |
+| `ValueNet(input_dim, hidden=256)` | Stages 2–3; `input_dim=19` for Stage 2, `768` for Stage 3; policy=uniform |
+| `DualNet(input_dim=768, hidden=256)` | Stage 4; shared trunk + value head + policy head (masked softmax over legal moves) |
+| `ResNet(input_dim=768, n_filters=128, n_blocks=5)` | Stage 5; residual trunk + value + policy heads |
+| `attribution_weights(board, net)` | Gradient of value w.r.t. input; 12 plane-aggregated values for 768-dim; `policy_top5` for Dual/ResNet |
+| Move encoding | `from_sq * 64 + to_sq` (4096-dim policy space) |
+
+All 13 unit tests passing as of Session 21.
 
 ### Current Weight State (run_id=24, game 100 — neural net, overnight run in progress)
 
@@ -213,7 +233,12 @@ benchmark will use no move limit — chess rules only via claim_draw=True).
 | `scripts/python/engine_hardcoded_material.py` | Archive of hardcoded-material engine condition (runs 1–19): 14 positional features, material hard-coded |
 | `scripts/python/engine_learnable_material.py` | Learnable-material engine condition (run 20+): 19 features — 5 material + 14 positional; no hard-coded piece values. **Session 16:** `knight_pst` replaced by `knight_outpost` (`_safe_knight_outpost()` — knights in opponent's half not attacked by opponent pawns) |
 | `scripts/python/engine_nn.py` | Neural net engine (run 24+): ChessNet MLP (19→32→1, tanh); `evaluate()`, `negamax()`, `get_best_move()`, `attribution_weights()` (dV/dx_i at starting position), `nn_td_update()` (R-friendly interface for reticulate), `model_to_b64()` / `model_from_b64()` for Supabase storage |
-| `scripts/python/selfplay_nn.ipynb` | TD(0)+Adam self-play training for NN condition; same DB schema as linear conditions; attribution weights logged instead of raw params; current runs: 24 |
+| `scripts/python/selfplay_nn.ipynb` | TD(0)+Adam self-play training for NN condition; attribution weights logged; current runs: 24 |
+| `scripts/python/selfplay_nn_v2.ipynb` | **New (Session 21)** — self-play + AdamW (weight_decay=1e-4) + MultiStepLR + resignation; run_id=28 |
+| `scripts/python/selfplay_sf_nn.ipynb` | **New (Session 21)** — SF teacher (Adam); chess-rules-only termination; run_id=27 |
+| `scripts/python/selfplay_sf_nn_v2.ipynb` | **New (Session 21)** — SF teacher + AdamW + MultiStepLR + temperature move selection + resignation; run_id=29 |
+| `scripts/python/engine_nn_v2.py` | **New (Session 21)** — Stage 2–5 engine: `board_to_tensor` (768-dim bitboard), `MCTSNode`, `mcts_search`, `ValueNet` (Stages 2–3), `DualNet` (Stage 4), `ResNet` (Stage 5); all 13 tests passing |
+| `scripts/python/update_v2_notebooks.py` | Utility: patches v2 notebooks with AlphaZero improvements |
 | `scripts/python/selfplay_td0.ipynb` | TD(0) self-play training; epsilon-greedy; v2 engine; current runs: 18 |
 | `scripts/python/selfplay_learnable_material.ipynb` | TD(0) self-play training; learnable material condition; imports `engine_learnable_material`; current runs: 20 |
 | `scripts/python/selfplay_softmax.ipynb` | TD(0) self-play; softmax move selection (τ=0.05, top-10); current runs: 15 |
@@ -232,7 +257,7 @@ benchmark will use no move limit — chess rules only via claim_draw=True).
 | `scripts/r/td_tutorial.qmd` | Tutorial: TD(0) learning via Scholar's Mate walkthrough |
 | `scripts/r/negamax_tutorial.qmd` | Tutorial: negamax search with alpha-beta pruning; worked example using live weights |
 | `scripts/r/05_move_scorer.R` | Parameterized script — score all legal moves from any FEN at configurable depth/run |
-| `scripts/r/05_stockfish_benchmark.R` | Parameterized script — run ELO benchmark vs Stockfish; designed to run as a background job so the console stays free. Config includes `ENGINE_MODULE` parameter (`"engine"` for runs 1–19, `"engine_learnable_material"` for run 20+, `"engine_nn"` for run 24+). **Session 17:** 80 half-move limit removed — games now play to natural conclusion under chess rules only (`claim_draw=TRUE`) |
+| `scripts/r/05_stockfish_benchmark.R` | Parameterized script — run ELO benchmark vs Stockfish; designed to run as a background job. Config includes `ENGINE_MODULE` parameter (`"engine"` for runs 1–19, `"engine_learnable_material"` for run 20+, `"engine_nn"` for runs 24–26, `"engine_nn_v2"` for Stage 2–5 runs). **Session 17:** 80 half-move limit removed. **Session 21:** logs `seed_run_id`/`seed_game_number`; tries `nn_sf_run_*` checkpoint naming before `nn_run_*` |
 | `scripts/r/seed_supabase.R` | **New (Session 18)** — one-time seeding script: creates `nn_models` table in Supabase; seeds run_id=2 (learnable material from local run_id=21) and run_id=3 (NN from local run_id=24); safe to re-run |
 | `scripts/r/05_search_explorer.R` | Shiny app — interactive move scorer; navigate positions, compare move rankings by depth |
 | `scripts/r/06_search_mechanics.R` | Step-by-step walkthrough: board evaluation feature-by-feature, negamax depth-by-depth |

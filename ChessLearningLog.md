@@ -1314,6 +1314,77 @@ No active self-play training jobs.
 
 ---
 
+## Session 21 — October 17, 2026
+
+### What We Worked On
+
+- Assessed run 24 completion (game 1305): ELO plateau confirmed at ~982; 12/19 correct signs; decided to treat as a closed result
+- Human play run 26 (games 4–5): signs fluctuated 14→11→15/19; identified per-game seed not recorded in DB as a data quality gap
+- Added `seed_run_id` and `seed_game_number` columns to `games` and `stockfish_games` tables
+- Updated `07_human_play.R` and `05_stockfish_benchmark.R` to log seed columns; backfilled `stockfish_games` historical rows
+- Created and ran `selfplay_sf_nn.ipynb` (SF teacher, plain Adam) — run_id=27; ran to 640 games
+- Assessed run 27: ELO ~1105 at games 110 and 390 (above run 24's peak of ~1079), slipped to 1079 at game 440; material features converging strongly; sign count volatile (peaked 18/19 at game 340)
+- Read the AlphaZero preprint (background/alphazero_preprint.pdf): identified L2 regularisation, LR schedule, temperature move selection, and resignation as actionable near-term improvements
+- Created `selfplay_sf_nn_v2.ipynb` (run_id=29, SF teacher + AdamW + LR schedule + temperature + resignation)
+- Created `selfplay_nn_v2.ipynb` (run_id=28, self-play + AdamW + LR schedule + resignation)
+- Ran 10-game test tranches: run 28 (11/19 signs, 50% draws), run 29 (12/19 signs vs run 27's 17/19 at same milestone)
+- Read `PositronAssistantConversations.md`: found a Stage 2–5 MCTS implementation roadmap and hand-off to implement `engine_nn_v2.py`
+- Implemented and fully tested `engine_nn_v2.py` (all 13 checks passing)
+- DB cleanup: deleted duplicate game_id=9924 (run 28 game_number=1)
+
+### Key Findings
+
+**run_id=24 (NN self-play) — confirmed collapse:**
+- Game 1305 benchmark: 0W/15L/5D vs SF1320 → ELO ~982
+- Trajectory: 1079 → 1079 → 1051 → 982 → 982 — stable floor, no recovery
+- 12/19 correct signs at game 1305 (peaked 18/19 at game 700); run treated as complete
+
+**run_id=27 (SF teacher, Adam) — genuine improvement over self-play:**
+- ELO ~1105 at games 110 and 390 — above run 24's all-time peak (~1079)
+- Slipped to 1079 at game 440 benchmark; 640 games total, no further benchmark taken
+- Material features converging monotonically: material_queen +0.442 at game 440
+- Sign count oscillated 11–18/19 (peaked at game 340); positional features unstable
+- 640 game weights: 15/19 correct; wrong: bishop_pair, doubled_pawn, piece_development, connected_rooks
+
+**v2 notebooks (runs 28 and 29) — AlphaZero improvements added:**
+- `torch.optim.AdamW` with `weight_decay=1e-4` (L2 regularisation)
+- `MultiStepLR` step-decay schedule: LR drops 10× at game milestones [200, 500]
+- Temperature move selection for first 15 full moves (SF teacher only; self-play keeps epsilon-greedy)
+- Resignation when engine value ≤ −0.9 for 4 consecutive engine half-moves
+- Two bugs fixed: misplaced `consecutive_bad = 0` in game-over block; `MultiStepLR` `KeyError` from `last_epoch >= 0` on fresh optimizer (fixed with session-relative milestone conversion)
+
+**engine_nn_v2.py — Stage 2–5 engine, all tests passing:**
+- `board_to_tensor()`: 768-dim bitboard (12 planes × 64 squares, White's perspective)
+- `MCTSNode`: PUCT UCB formula; root pre-expanded before simulation loop
+- `mcts_search()`: works with ValueNet (uniform policy), DualNet, ResNet; `board_to_input` param for Stage 2 (19-feature) compatibility
+- `ValueNet(input_dim, hidden)`: Stages 2–3; `input_dim=19` for Stage 2, `768` for Stage 3
+- `DualNet(input_dim, hidden)`: Stage 4; policy head with masked softmax over legal moves
+- `ResNet(input_dim, n_filters, n_blocks)`: Stage 5; 5 residual blocks, 128 filters
+- `attribution_weights()`: plane-aggregated (12 values) for 768-dim; `policy_top5` key for Dual/ResNet
+- `save_model` / `load_model` / `model_to_b64` / `model_from_b64`: same interface as `engine_nn.py`
+
+### Scripts Changed / Created
+
+| File | Change |
+|---|---|
+| `data/chess_learning.db` | Added `seed_run_id`, `seed_game_number` to `games` and `stockfish_games`; deleted duplicate row |
+| `scripts/r/07_human_play.R` | `log_human_game()` and `log_human_game_nn()` now log seed columns; call sites pass `source_run_info()` |
+| `scripts/r/05_stockfish_benchmark.R` | Logs `seed_run_id` / `seed_game_number`; filename fix: tries `nn_sf_run_*` before `nn_run_*` |
+| `scripts/python/selfplay_sf_nn.ipynb` | New: SF teacher (Adam); fixed double-logging bug; removed move limit |
+| `scripts/python/selfplay_sf_nn_v2.ipynb` | New: SF teacher (AdamW + LR schedule + temperature + resignation); run_id=29 |
+| `scripts/python/selfplay_nn_v2.ipynb` | New: self-play (AdamW + LR schedule + resignation); run_id=28 |
+| `scripts/python/engine_nn_v2.py` | New: Stage 2–5 engine (board_to_tensor, MCTS, ValueNet, DualNet, ResNet) |
+| `scripts/python/update_v2_notebooks.py` | Utility script used to patch v2 notebooks |
+
+### Steps for Next Session
+
+1. **Run 29 (SF teacher v2) overnight** — 200+ game tranche; benchmark at game 100
+2. **Run 28 (self-play v2) overnight** — parallel; benchmark at game 100
+3. **Compare run 28/29 sign trajectories against run 24/27** at game 100 to test AdamW effect
+4. **Write `selfplay_mcts_v1.ipynb`** (Stage 2) — MCTS + `ValueNet(input_dim=19)` + replay buffer; coordinate with Positron assistant
+5. **Update `05_stockfish_benchmark.R`** for `engine_nn_v2` module name
+6. **Assess run 27 game 640 ELO** — no benchmark taken past game 440; run one before continuing
+
 ## Session 20 — October 15, 2026
 
 ### What We Worked On

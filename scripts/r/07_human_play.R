@@ -217,12 +217,13 @@ create_new_run <- function(source_run_id, source_checkpoint, weights_vec) {
 }
 
 log_human_game <- function(run_id, game_number, outcome, n_half,
-                            elapsed, td_result, pgn_str, human_color) {
+                            elapsed, td_result, pgn_str, human_color,
+                            seed_run_id, seed_game_number) {
     con <- dbConnect(SQLite(), DB_PATH)
     dbExecute(con,
-        "INSERT INTO games (run_id,game_number,outcome,n_halfmoves,duration_s,terminated_by,human_color)
-         VALUES (?,?,?,?,?,'natural',?)",
-        list(run_id, game_number, outcome, n_half, elapsed, human_color))
+        "INSERT INTO games (run_id,game_number,outcome,n_halfmoves,duration_s,terminated_by,human_color,seed_run_id,seed_game_number)
+         VALUES (?,?,?,?,?,'natural',?,?,?)",
+        list(run_id, game_number, outcome, n_half, elapsed, human_color, seed_run_id, seed_game_number))
     dbExecute(con,
         "INSERT INTO game_records (run_id,game_number,pgn,td_error)
          VALUES (?,?,?,?)",
@@ -278,7 +279,8 @@ create_new_nn_run <- function(source_run_id, source_checkpoint, attr_weights) {
 
 log_human_game_nn <- function(run_id, game_number, outcome, n_half,
                                elapsed, nn_result, pgn_str, human_color,
-                               model, model_dir) {
+                               model, model_dir,
+                               seed_run_id, seed_game_number) {
     # Convert Python dicts to R named vectors
     deltas  <- setNames(as.numeric(unlist(nn_result$deltas)),
                         names(nn_result$deltas))
@@ -288,9 +290,9 @@ log_human_game_nn <- function(run_id, game_number, outcome, n_half,
 
     con <- dbConnect(SQLite(), DB_PATH)
     dbExecute(con,
-        "INSERT INTO games (run_id,game_number,outcome,n_halfmoves,duration_s,terminated_by,human_color)
-         VALUES (?,?,?,?,?,'natural',?)",
-        list(run_id, game_number, outcome, n_half, elapsed, human_color))
+        "INSERT INTO games (run_id,game_number,outcome,n_halfmoves,duration_s,terminated_by,human_color,seed_run_id,seed_game_number)
+         VALUES (?,?,?,?,?,'natural',?,?,?)",
+        list(run_id, game_number, outcome, n_half, elapsed, human_color, seed_run_id, seed_game_number))
     dbExecute(con,
         "INSERT INTO game_records (run_id,game_number,pgn,td_error)
          VALUES (?,?,?,?)",
@@ -845,7 +847,8 @@ server <- function(input, output, session) {
             log_human_game_nn(session_run_id(), gn, outcome,
                               length(move_history()), elapsed,
                               nn_result, build_pgn(move_san_log()), hc,
-                              model, MODEL_DIR)
+                              model, MODEL_DIR,
+                              source_run_info()$run_id, source_run_info()$checkpoint)
 
             # Extract and store NN-specific diagnostics
             .deltas  <- setNames(as.numeric(unlist(nn_result$deltas)),          names(nn_result$deltas))
@@ -871,7 +874,8 @@ server <- function(input, output, session) {
                 draw_lr_scales = list(king_safety = 0.05, center_control = 0.2))
             session_weights(result$weights)
             log_human_game(session_run_id(), gn, outcome,
-                           length(move_history()), elapsed, result, build_pgn(move_san_log()), hc)
+                           length(move_history()), elapsed, result, build_pgn(move_san_log()), hc,
+                           source_run_info()$run_id, source_run_info()$checkpoint)
         }
 
         post_game_rv(list(

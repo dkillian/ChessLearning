@@ -14,7 +14,7 @@ library(reticulate)
 
 # ---- Configuration ----
 
-RUN_ID        <- 24          # which run's weights to use
+RUN_ID        <- 27          # which run's weights to use
 CHECKPOINT    <- NULL        # NULL = latest checkpoint; or set an integer game number
 ELO_LEVELS    <- 1320        # Stockfish ELO levels to test (minimum is 1320)
 N_GAMES       <- 20          # games per ELO level (even number = balanced colours)
@@ -63,10 +63,14 @@ if (is.null(CHECKPOINT)) {
 
 if (ENGINE_MODULE == "engine_nn") {
     dbDisconnect(con)
-    model_path <- file.path(MODEL_DIR, sprintf("nn_run_%d_game_%d.pt", RUN_ID, CHECKPOINT))
+    # Try SF-teacher naming first (nn_sf_run_*), then self-play naming (nn_run_*)
+    model_path <- file.path(MODEL_DIR, sprintf("nn_sf_run_%d_game_%d.pt", RUN_ID, CHECKPOINT))
     if (!file.exists(model_path)) {
-        stop("Model file not found: ", model_path,
-             "\nExpected a .pt checkpoint saved by selfplay_nn.ipynb.")
+        model_path <- file.path(MODEL_DIR, sprintf("nn_run_%d_game_%d.pt", RUN_ID, CHECKPOINT))
+    }
+    if (!file.exists(model_path)) {
+        stop("Model file not found for run_id=", RUN_ID, ", checkpoint=", CHECKPOINT,
+             "\nLooked for nn_sf_run_*.pt (SF teacher) and nn_run_*.pt (self-play) in: ", MODEL_DIR)
     }
     engine_params <- engine_mod$load_model(model_path)
     cat(sprintf("Model loaded: %s\n", model_path))
@@ -199,13 +203,14 @@ for (elo in ELO_LEVELS) {
         dbExecute(con_g,
             "INSERT INTO stockfish_games
              (run_id, game_number, sf_elo, game_index, engine_color,
-              result, engine_won, n_half, pgn)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              result, engine_won, n_half, pgn, seed_run_id, seed_game_number)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             list(as.integer(RUN_ID), as.integer(CHECKPOINT), as.integer(elo),
                  as.integer(i), color_label,
                  result$result,
                  if (isTRUE(result$engine_won)) 1L else if (isFALSE(result$engine_won)) 0L else NA,
-                 result$n_half, pgn_str))
+                 result$n_half, pgn_str,
+                 as.integer(RUN_ID), as.integer(CHECKPOINT)))
         dbDisconnect(con_g)
 
         cat(sprintf("  Game %d/%d (%s) — %s in %d half-moves  [%.0fs]\n",
