@@ -3,7 +3,7 @@
 **Activity**: Learning Study
 **Workspace**: Chess Learning
 **Initialized**: September 29, 2026
-**Status**: Active — Session 20; neural net condition (run_id=24, 917 games, 15/19 correct signs, ELO ~1051 at game 544); learnable material (run_id=21, 1050 games, ELO ~1285); hardcoded material baseline through run_id=19; public app deployed and crash-fixed.
+**Status**: Active — Session 21; run_id=24 (NN self-play, 1305 games) closed — ELO collapsed to ~982 (self-play collapse confirmed); run_id=27 (SF teacher, Adam, 640 games) ELO peaked ~1105; runs 28–29 (AdamW v2 notebooks) 10-game test tranches complete; `engine_nn_v2.py` implemented and tested (Stages 2–5, 13/13 checks passing).
 
 ---
 
@@ -186,13 +186,17 @@ Game phase is a midgame fraction [0, 1] computed by `_game_phase(board)` from we
 
 ## Current Weight State
 
-### run_id=24 (neural net MLP 19→32→1, TD(0)+Adam, 1005+ games — past-checkpoint opponent active from game 996; attribution weights at game 1005)
+### run_id=24 (neural net MLP 19→32→1, TD(0)+Adam — **closed at game 1305**)
 
-Correct sign (17/19): pawn_advancement (+0.591), material_queen (+0.588), material_rook (+0.216), knight_outpost (+0.162), material_bishop (+0.124), mobility (+0.108), passed_pawn (+0.106), rook_seventh (+0.076), center_control (+0.059), rook_open_file (+0.058), material_knight (+0.054), material_pawn (+0.043), king_safety (+0.038), piece_development (+0.037), connected_rooks (+0.011), backward_pawn (+0.001), doubled_pawn (+0.001)
+Self-play collapse confirmed. ELO trajectory: ~1079 (game 50) → ~1079 (game 380) → ~1051 (game 544) → ~982 (game 900) → ~982 (game 1305, final). Sign count peaked at **18/19 at game 700**, declined to 12/19 at game 1305. Past-checkpoint opponent mechanism (added at game 996) corrected three stuck features (`center_control`, `rook_open_file`, `connected_rooks`) in 10 games but did not reverse ELO decline. Run treated as complete.
 
-Wrong sign (2/19): isolated_pawn (−0.004), bishop_pair (−0.057)
+Final benchmark (game 1305): 0W/15L/5D vs SF1320 → ELO ~982.
 
-**17/19 correct signs** — best result for the NN condition. Three features corrected in 10 games after past-checkpoint opponent introduced: `center_control`, `rook_open_file`, `connected_rooks` (all stuck wrong from game 200 to 994). Stockfish ELO declining: ~1079 (game 50) → ~1051 (game 544) → ~982 (game 900). ELO benchmark with past-opponent mechanism pending. Overnight tranche in progress from game 995.
+### run_id=27 (SF teacher, `selfplay_sf_nn.ipynb`, plain Adam, 640 games from zero)
+
+Attribution weights at game 640: **15/19 correct signs**. Wrong: `bishop_pair`, `doubled_pawn`, `piece_development`, `connected_rooks`.
+
+ELO: ~1105 at games 110 and 390 (above run_id=24's all-time peak); slipped to ~1079 at game 440 (last benchmark). No benchmark at game 640. Material converging strongly: `material_queen` +0.442 at game 440. Sign count oscillated 11–18/19 (peaked game 340).
 
 ### run_id=21 (learnable material, `knight_outpost`, 1050 games from zero — v2 sign convention: all positive correct)
 
@@ -357,11 +361,18 @@ Two engine modules maintained as first-class research artifacts (one per conditi
 
 ### Stage 02 — Self-Play / Training (Python)
 
-Three active training notebooks, one per condition/variant:
+Active training notebooks:
 
 - `selfplay_td0.ipynb`: hardcoded material condition; TD(0), epsilon-greedy (runs 7–19)
 - `selfplay_learnable_material.ipynb`: learnable material condition; TD(0), epsilon-greedy (runs 20+)
-- `selfplay_nn.ipynb`: neural net condition; TD(0)+Adam; attribution weights logged (runs 24+)
+- `selfplay_nn.ipynb`: neural net v1; TD(0)+Adam; past-checkpoint opponent mechanism (runs 24+)
+- `selfplay_nn_v2.ipynb`: neural net self-play v2; AdamW + LR schedule + resignation (run 28+)
+- `selfplay_sf_nn.ipynb`: neural net SF teacher v1; TD(0)+Adam; chess-rules-only termination (run 27+)
+- `selfplay_sf_nn_v2.ipynb`: neural net SF teacher v2; AdamW + LR schedule + temperature + resignation (run 29+)
+- `selfplay_mcts_v1.ipynb`: Stage 2 — MCTS + ValueNet(input_dim=19); game-outcome replay buffer (run 30+)
+- `selfplay_mcts_v2.ipynb`: Stage 3 — MCTS + ValueNet(input_dim=768); bitboard input (run 31+)
+- `selfplay_mcts_v3.ipynb`: Stage 4 — MCTS + DualNet; dual loss MSE+CE; policy targets from visit counts (run 32+)
+- `selfplay_mcts_v4.ipynb`: Stage 5 — MCTS + ResNet(5 blocks, 128 filters); AlphaZero architecture (run 33+)
 - `selfplay_softmax.ipynb`: variant — softmax move selection with temperature τ=0.05, style modifier presets
 
 Archived notebooks (v1 engine, prior runs):
@@ -395,7 +406,16 @@ Chess Learning/                                  ← Repo root
 │   │   ├── engine.ipynb                         ← Stage 01: documented notebook with verification
 │   │   ├── selfplay_td0.ipynb                   ← Stage 02: hardcoded material training (TD(0))
 │   │   ├── selfplay_learnable_material.ipynb    ← Stage 02: learnable material training (TD(0))
-│   │   ├── selfplay_nn.ipynb                    ← Stage 02: neural net training (TD(0)+Adam)
+│   │   ├── selfplay_nn.ipynb                    ← Stage 02: neural net v1 (TD(0)+Adam + past-checkpoint opponent)
+│   │   ├── selfplay_nn_v2.ipynb                 ← Stage 02: neural net self-play v2 (AdamW + LR schedule + resignation)
+│   │   ├── selfplay_sf_nn.ipynb                 ← Stage 02: neural net SF teacher v1 (TD(0)+Adam)
+│   │   ├── selfplay_sf_nn_v2.ipynb              ← Stage 02: neural net SF teacher v2 (AdamW + LR schedule + temperature + resignation)
+│   │   ├── engine_nn_v2.py                      ← Stage 2–5 engine: board_to_tensor, MCTS, ValueNet, DualNet, ResNet
+│   │   ├── update_v2_notebooks.py               ← Utility: patches v2 notebooks with AlphaZero improvements
+│   │   ├── selfplay_mcts_v1.ipynb               ← Stage 2: MCTS + ValueNet(19 features)
+│   │   ├── selfplay_mcts_v2.ipynb               ← Stage 3: MCTS + ValueNet(768 bitboard)
+│   │   ├── selfplay_mcts_v3.ipynb               ← Stage 4: MCTS + DualNet (value + policy heads)
+│   │   ├── selfplay_mcts_v4.ipynb               ← Stage 5: MCTS + ResNet (AlphaZero architecture)
 │   │   ├── selfplay_softmax.ipynb               ← Stage 02 variant: softmax + style modifiers
 │   │   ├── selfplay_mc.ipynb                    ← Archive: Monte Carlo version (superseded)
 │   │   ├── selfplay_sf.ipynb                    ← Archive: Stockfish-teacher variant (not continued)
@@ -435,11 +455,20 @@ Chess Learning/                                  ← Repo root
 | `scripts/python/engine.py` | Importable module (hardcoded material): 14-feature positional extractor, linear evaluator with hard-coded material (`PIECE_VALUES`), negamax search with alpha-beta, `_game_phase()` helper. Used by hardcoded-material training notebooks. |
 | `scripts/python/engine_hardcoded_material.py` | Archive copy of `engine.py` as of the hardcoded-material condition (runs 1–19). Preserved as a research artifact. |
 | `scripts/python/engine_learnable_material.py` | Learnable material engine: 19 features — 5 material + 14 positional. `knight_pst` replaced by `knight_outpost` (`_safe_knight_outpost()`) from run_id=21. No hard-coded piece values. |
-| `scripts/python/engine_nn.py` | Neural net engine (run 24+): ChessNet MLP (19→32→1, tanh); implements `evaluate()`, `negamax()`, `get_best_move()`, `attribution_weights()` (dV/dx_i at starting position), `nn_td_update()` (R-friendly interface for reticulate), `model_to_b64()` / `model_from_b64()` for Supabase storage. |
+| `scripts/python/engine_nn.py` | Neural net engine v1 (runs 24–26): ChessNet MLP (19→32→1, tanh); implements `evaluate()`, `negamax()`, `get_best_move()`, `attribution_weights()` (dV/dx_i at starting position), `nn_td_update()` (R-friendly interface for reticulate), `model_to_b64()` / `model_from_b64()` for Supabase storage. |
+| `scripts/python/engine_nn_v2.py` | Stage 2–5 engine (Session 21): `board_to_tensor()` (768-dim bitboard, 12 planes × 64 squares, White's perspective), `MCTSNode` (PUCT UCB; root pre-expanded), `mcts_search()` (`board_to_input` param for Stage 2 compatibility), `ValueNet` (Stages 2–3; `input_dim=19` or `768`), `DualNet` (Stage 4; policy head with masked softmax), `ResNet` (Stage 5; 5 residual blocks, 128 filters), `attribution_weights()` (plane-aggregated for 768-dim; `policy_top5` for Dual/ResNet). All 13 unit tests passing. |
 | `scripts/python/engine.ipynb` | Stage 01 notebook: same content as `engine.py` (v2 architecture) with markdown explanations and 6 verification checks. |
 | `scripts/python/selfplay_td0.ipynb` | Primary training script (hardcoded material): `play_game`, `td_update` (TD(0)), `train`; epsilon-greedy; SQLite logging. Configure via `RUN_ID`, `DEPTH`, `RESUME`, `N_GAMES`. |
 | `scripts/python/selfplay_learnable_material.ipynb` | Training script (learnable material): same structure as `selfplay_td0.ipynb`; imports `engine_learnable_material`. Configure via `RUN_ID`, `DEPTH`, `RESUME`, `N_GAMES`. |
-| `scripts/python/selfplay_nn.ipynb` | Training script (neural net): TD(0)+Adam; imports `engine_nn`; logs attribution weights (dV/dx_i) to `weights` table instead of raw parameters. Same DB schema as linear conditions. Configure via `RUN_ID`, `DEPTH`, `RESUME`, `N_GAMES`. |
+| `scripts/python/selfplay_nn.ipynb` | Neural net training v1: TD(0)+Adam; past-checkpoint opponent mechanism (`PAST_OPPONENT_FREQ`, `PAST_OPPONENT_CHECKPOINTS`); logs attribution weights to `weights` table. Configure via `RUN_ID`, `DEPTH`, `RESUME`, `N_GAMES`. |
+| `scripts/python/selfplay_nn_v2.ipynb` | Neural net self-play v2: AdamW (`weight_decay=1e-4`) + `MultiStepLR` (drops 10× at game milestones [200, 500]) + resignation (value ≤ −0.9 for 4 consecutive engine half-moves). Run 28+. |
+| `scripts/python/selfplay_sf_nn.ipynb` | Neural net SF teacher v1: plays vs Stockfish at configurable ELO; TD(0)+Adam; chess-rules-only termination (no move limit). Run 27+. |
+| `scripts/python/selfplay_sf_nn_v2.ipynb` | Neural net SF teacher v2: AdamW + `MultiStepLR` + temperature move selection (first 15 full moves) + resignation. Run 29+. |
+| `scripts/python/update_v2_notebooks.py` | Utility script: patches v2 notebooks with AlphaZero improvements via JSON editing. |
+| `scripts/python/selfplay_mcts_v1.ipynb` | Stage 2 MCTS training: `ValueNet(input_dim=19)` + `extract_features`; game-outcome training targets via replay buffer (deque 10k); AdamW + MultiStepLR; N_SIMULATIONS=200; run_id=30+. |
+| `scripts/python/selfplay_mcts_v2.ipynb` | Stage 3 MCTS training: `ValueNet(input_dim=768)` + `board_to_tensor`; 12 plane-aggregated attribution; run_id=31+. |
+| `scripts/python/selfplay_mcts_v3.ipynb` | Stage 4 MCTS training: `DualNet(768)`; dual loss MSE(value)+CE(policy); policy targets = normalized MCTS visit counts; `policy_loss` logged to `game_records`; run_id=32+. |
+| `scripts/python/selfplay_mcts_v4.ipynb` | Stage 5 MCTS training: `ResNet(768, n_filters=128, n_blocks=5)`; same dual loss and logging as Stage 4; AlphaZero architecture at small scale; run_id=33+. |
 | `scripts/python/selfplay_softmax.ipynb` | Variant training script: softmax move selection (τ=0.05, top-10 candidates), style modifier presets (neutral/attacking/cautious/reckless/positional). |
 | `scripts/python/selfplay_sf.ipynb` | Stockfish-teacher variant (not continued since run_id=16): plays against Stockfish at configurable ELO, TD(0) updates, built-in ELO estimation. Windows asyncio fix included. Retained for reference. |
 | `scripts/python/selfplay_mc.ipynb` | Archived Monte Carlo version of the self-play loop. Superseded by TD(0). Retained for reference. |
@@ -504,7 +533,7 @@ Chess Learning/                                  ← Repo root
 - Why do `doubled_pawn` and `pawn_advancement` show wrong signs persistently in linear runs?
   - `doubled_pawn`: magnitude asymmetry — 54% of updates are correct-direction but a fat negative tail overwhelms; near-random walk. Corrected by the neural net (+0.032 at game 910).
   - `pawn_advancement`: frequency bias — 61% of updates are negative in linear runs; credit assignment problem. Neural net resolves this: top feature at +0.541 by game 910.
-- Why does the neural net (run_id=24, 15/19 correct signs, pawn_advancement resolved) show significantly lower Stockfish ELO (~1051 at game 544) than the linear hardcoded-material engine (~1355)? Possible causes: self-play position distribution overfitting, attribution proxy limitations (dV/dx_i ≠ actual internal weights), or architectural issues still under investigation.
+- **NN self-play collapse (run_id=24, closed):** ELO declined from ~1079 peak to ~982 final despite sign metrics sometimes improving. Self-play position distribution overfitting diagnosed as the primary cause. Past-checkpoint opponent mechanism corrected 3 stuck features in 10 games but did not reverse ELO decline. Stockfish teacher (run_id=27, ELO ~1105) confirms that the self-play distribution itself is the limiting factor, not the architecture. AlphaZero-style improvements (AdamW, LR schedule, temperature, resignation) added in v2 notebooks (runs 28/29) for next comparison.
 - Will the learnable material condition (run_id=21, ELO ~1285) close the ELO gap to the hardcoded material baseline (~1355) with more training?
 - Does the sequence of concept acquisition differ across the three conditions (hardcoded material, learnable material, neural net)?
 - What threshold defines concept "emergence"? (Calibration in progress.)

@@ -11,9 +11,12 @@ Minor changes within a run (e.g., tranche size, LR adjustment) continue the same
 |--------|------|-------|-------|----|------------|-------------|---------|------------|
 | 22 | 2026-10-12 | 3 | 3 | 0.001 | — | seeded run_id=21 game_200 | N/A (human) | Human play; seeded from run_id=21 game 200; learnable material |
 | 23 | 2026-10-12 | ? | 3 | 0.001 | — | seeded run_id=21 game_240 | N/A (human) | Human play; seeded from run_id=21 game 240; learnable material |
-| 24 | 2026-10-13 | 917 | 3 | 0.001 | 200 | zero | 0.1 | **Neural net (MLP 19→32→1); TD(0)+Adam; 15/19 correct signs at game 910; pawn_advancement top feature (+0.541); 68.4% decisive; ELO ~1051 at game 544 (below linear baseline)** |
+| 24 | 2026-10-13 | 1305 | 3 | 0.001 | none | zero | 0.1 | **Neural net (MLP 19→32→1); TD(0)+Adam; peaked 18/19 signs at game 700; ELO peaked ~1079, declined to ~982 at game 1305; self-play collapse confirmed; run closed** |
 | 25 | 2026-10-13 | 1 | 3 | 0.001 | — | seeded run_id=24 game_0 (attribution weights) | N/A (human) | Accidental: old human play app seeded from NN attribution weights before NN support added; effectively zero-initialized linear run |
 | 26 | 2026-10-13 | 2+ | 3 | 0.001 | — | seeded run_id=24 game_10 | N/A (human) | **NN human play** (new NN-aware code); genuine PyTorch TD updates; ~3× larger parameter updates per halfmove than self-play |
+| 27 | 2026-10-17 | 640 | 3 | 0.001 | none | zero | N/A (SF moves) | **SF teacher NN (`selfplay_sf_nn.ipynb`); plain Adam; ELO ~1105 at games 110 & 390 (above run 24 peak); slipped to ~1079 at game 440; 15/19 correct signs at game 640** |
+| 28 | 2026-10-17 | 10 | 3 | 0.001 | none | zero | 0.1 | **Self-play v2 (`selfplay_nn_v2.ipynb`); AdamW + LR schedule + resignation; 11/19 signs; 50% decisive** |
+| 29 | 2026-10-17 | 10 | 3 | 0.001 | none | zero | temp (first 15 moves) | **SF teacher v2 (`selfplay_sf_nn_v2.ipynb`); AdamW + LR schedule + temperature + resignation; 12/19 signs at game 10** |
 | 1 | 2026-09-29 | 200 | 2 | 0.001 | 200 | random | — | Verification run; baseline pipeline |
 | 2 | 2026-10-03 | 900 | 2 | 0.001→0.01 | 200 | random | — | Full run; diagnosed draw equilibrium; tested higher LR |
 | 3 | 2026-10-04 | 200 | 2 | 0.001 | 200 | canonical | — | Warm-start + removed `board.can_claim_draw()`; draws persisted via rook-shuffle repetition |
@@ -1314,6 +1317,130 @@ No active self-play training jobs.
 
 ---
 
+## Session 22 — October 18–19, 2026
+
+### What We Worked On
+
+- Reviewed and corrected activity documentation: fixed session ordering in Log.md (Session 20 before 21), updated Run Registry (run_id=24 to closed, runs 27/28/29 added)
+- Updated ChessLearningDocumentation.md: status header, Current Weight State (run_id=24 closed, run_id=27 added), Stage 02 pipeline, Folder Structure, File Descriptions, Open Questions
+- Created four MCTS training notebooks implementing the AlphaZero Stage 2–5 progression:
+  - `selfplay_mcts_v1.ipynb` — Stage 2: MCTS + ValueNet(input_dim=19), run_id=30
+  - `selfplay_mcts_v2.ipynb` — Stage 3: MCTS + ValueNet(input_dim=768), run_id=31
+  - `selfplay_mcts_v3.ipynb` — Stage 4: DualNet + dual loss (MSE + CE), run_id=32
+  - `selfplay_mcts_v4.ipynb` — Stage 5: ResNet(5 blocks, 128 filters), run_id=33
+- Fixed three successive schema errors discovered during v1 smoke test:
+  1. `runs` table: no `hyperparameters` column — fixed to actual columns (`depth`, `learning_rate`, `notes`, `engine_version`)
+  2. `start_game` variable dropped by repair script — restored in all four notebooks
+  3. `game_records` and `feature_stats` use `(run_id, game_number)`, not `game_id`
+- Ran 1-game smoke test of selfplay_mcts_v1: draw, 602 halfmoves, 5.5 min
+- Started overnight run: run_id=30, N_GAMES=80, RESUME=True, ~midnight Oct 19
+
+### Key Findings
+
+**Schema corrections (all four mcts notebooks):**
+- `runs`: `run_id, started_at, depth, learning_rate, move_limit, notes, last_updated, engine_version`
+- `game_records`: `record_id, run_id, game_number, pgn, td_error` (no `game_id` foreign key)
+- `feature_stats`: `stat_id, run_id, game_number, outcome, feature_name, mean_value` (no `game_id`)
+
+**Smoke test — game 1 (run_id=30):**
+- Outcome: draw, 602 halfmoves, 328 seconds (~5.5 min)
+- All 19 feature means near zero (fresh model, expected)
+- Training step executed (602 positions > BATCH_SIZE=64)
+- Long game explained: 50-move counter resets on captures; random MCTS generates frequent captures
+
+**Speed:** 5 min/game at N_SIMULATIONS=200 with ValueNet(19) → 80 games ≈ 7 hours overnight
+
+**Weight checkpoint at game 10 not yet verified** — first fires tonight; check in morning
+
+### Scripts Changed / Created
+
+| File | Change |
+|---|---|
+| `ChessLearningLog.md` | Fixed session ordering; updated run_id=24; added runs 27/28/29 |
+| `ChessLearningDocumentation.md` | Updated status, weight state, Stage 02 pipeline, Folder Structure, File Descriptions, Open Questions |
+| `scripts/python/selfplay_mcts_v1.ipynb` | New: Stage 2 — MCTS + ValueNet(19), run_id=30 |
+| `scripts/python/selfplay_mcts_v2.ipynb` | New: Stage 3 — MCTS + ValueNet(768), run_id=31 |
+| `scripts/python/selfplay_mcts_v3.ipynb` | New: Stage 4 — DualNet + dual loss (MSE+CE), run_id=32 |
+| `scripts/python/selfplay_mcts_v4.ipynb` | New: Stage 5 — ResNet(5 blocks, 128 filters), run_id=33 |
+
+### Overnight Job
+
+- **selfplay_mcts_v1.ipynb** — run_id=30, N_SIMULATIONS=200, N_GAMES=80, RESUME=True; started ~midnight Oct 19
+- First weight checkpoint fires at game 10; no checkpoint yet before overnight
+
+### Steps for Next Session
+
+1. **Assess overnight run_id=30** — decisive rate, game lengths, loss trajectory; confirm game 10 weight checkpoint logged correctly
+2. **Check weight signs at game 10, 20, etc.** — any learning signal from game-outcome targets?
+3. **Update `05_stockfish_benchmark.R`** to support `ENGINE_MODULE="engine_nn_v2"` (flagged Session 21, still pending)
+4. **Run ELO benchmark** on run_id=30 once overnight completes
+5. **Consider hard move limit** (e.g., 200 halfmoves) for mcts notebooks to prevent very long games
+6. **If v1 results positive**, plan v2 run (run_id=31, ValueNet(768)) for comparison
+
+---
+
+## Session 20 — October 15, 2026
+
+### What We Worked On
+
+- Reviewed activity documentation (`ChessLearningDocumentation.md`, `ChessLearningLog.md`)
+- Ran status queries on the SQLite database
+- Discovered run_id=24 reached **994+ games** (far beyond 500-game overnight target) and reviewed all four Stockfish benchmarks
+- Discussed self-play collapse diagnosis and DeepMind / AlphaGo Zero solutions
+- Implemented **past-checkpoint opponent mechanism** in `selfplay_nn.ipynb`
+- Ran 10-game test tranche (games 996–1005) to verify the mechanism
+- Updated all documentation files
+- Initiated overnight tranche with past-opponent mechanism active
+
+### Key Findings
+
+**run_id=24 Stockfish benchmark trajectory — ELO is declining with training:**
+
+| Checkpoint | W/L/D | ELO est. |
+|---|---|---|
+| Game 50 | 0/12/8 | ~1079 |
+| Game 380 | 2/14/4 | ~1079 |
+| Game 544 | 1/14/5 | ~1051 |
+| Game 900 | 1/16/3 | ~982 |
+
+ELO declining despite attribution metrics improving — classic self-play collapse. Network is overfitting to its own game distribution. Discussed AlphaGo Zero's solutions: MCTS training targets, past-checkpoint opponent pools, large replay buffer.
+
+**Past-checkpoint opponent mechanism (implemented this session):**
+- `play_game()` gains `opponent_model=None` parameter; learner randomly assigned WHITE or BLACK
+- Positions returned as `(features, color, is_learner)` 3-tuples
+- `td_update()` skips gradient updates on opponent positions but uses them as bootstrap targets
+- `train()` gains `past_opponent_freq` and `past_opponent_checkpoints` params; loads `.pt` files once before loop
+- Config: `PAST_OPPONENT_FREQ = 0.2`, `PAST_OPPONENT_CHECKPOINTS = [100, 200]`
+
+**10-game test tranche (games 996–1005) — promising early signal:**
+- **17/19 correct signs** at game 1005 — up from 15/19 at game 910 (had been stuck at 15/19 since game 200)
+- Three persistent wrong-sign features corrected: `center_control` (−0.017 → +0.059), `rook_open_file` (−0.030 → +0.058), `connected_rooks` (−0.023 → +0.011)
+- Still wrong: `bishop_pair` (−0.057), `isolated_pawn` (−0.004, borderline)
+- Decisive rate: 50% (5/10) — down from 78% in pre-patch games 946–995; likely noise at n=10 but worth monitoring
+- Weight changes are large (past-opponent games generate stronger TD signals than self-play, same effect as human play)
+
+### Scripts Changed
+
+| File | Change |
+|---|---|
+| `scripts/python/selfplay_nn.ipynb` | Implemented past-checkpoint opponent: `play_game()`, `td_update()`, `log_feature_stats()`, `log_position_logs()`, `train()`, config cell all updated |
+
+### Overnight Job
+
+- **NN self-play run_id=24**: RESUME=True, N_GAMES=250, PAST_OPPONENT_FREQ=0.2, checkpoints [100, 200]; started ~11pm
+- Latest model before overnight: `nn_run_24_game_994.pt`; overnight will resume from game 995+
+- Both checkpoint files confirmed present: `nn_run_24_game_100.pt`, `nn_run_24_game_200.pt`
+
+### Steps for Next Session
+
+1. **Assess overnight results** — check decisive rate, sign correctness, whether 17/19 holds after 250 more games
+2. **Run ELO benchmark on game 1005+ checkpoint** — real test of whether past-opponent mechanism improves external playing strength
+3. **Build `selfplay_sf_nn.ipynb`** — Stockfish teacher for the NN condition; mirrors `selfplay_nn.ipynb` but plays vs Stockfish at ELO 1320; TD(0)+Adam updates from those games
+4. **Play human games** via `07_human_play.R` with NN engine to inject novel positions
+5. **Reseed Supabase** — run `seed_supabase.R` to update run_id=3 (NN) with latest weights after overnight
+
+---
+
 ## Session 21 — October 17, 2026
 
 ### What We Worked On
@@ -1384,63 +1511,3 @@ No active self-play training jobs.
 4. **Write `selfplay_mcts_v1.ipynb`** (Stage 2) — MCTS + `ValueNet(input_dim=19)` + replay buffer; coordinate with Positron assistant
 5. **Update `05_stockfish_benchmark.R`** for `engine_nn_v2` module name
 6. **Assess run 27 game 640 ELO** — no benchmark taken past game 440; run one before continuing
-
-## Session 20 — October 15, 2026
-
-### What We Worked On
-
-- Reviewed activity documentation (`ChessLearningDocumentation.md`, `ChessLearningLog.md`)
-- Ran status queries on the SQLite database
-- Discovered run_id=24 reached **994+ games** (far beyond 500-game overnight target) and reviewed all four Stockfish benchmarks
-- Discussed self-play collapse diagnosis and DeepMind / AlphaGo Zero solutions
-- Implemented **past-checkpoint opponent mechanism** in `selfplay_nn.ipynb`
-- Ran 10-game test tranche (games 996–1005) to verify the mechanism
-- Updated all documentation files
-- Initiated overnight tranche with past-opponent mechanism active
-
-### Key Findings
-
-**run_id=24 Stockfish benchmark trajectory — ELO is declining with training:**
-
-| Checkpoint | W/L/D | ELO est. |
-|---|---|---|
-| Game 50 | 0/12/8 | ~1079 |
-| Game 380 | 2/14/4 | ~1079 |
-| Game 544 | 1/14/5 | ~1051 |
-| Game 900 | 1/16/3 | ~982 |
-
-ELO declining despite attribution metrics improving — classic self-play collapse. Network is overfitting to its own game distribution. Discussed AlphaGo Zero's solutions: MCTS training targets, past-checkpoint opponent pools, large replay buffer.
-
-**Past-checkpoint opponent mechanism (implemented this session):**
-- `play_game()` gains `opponent_model=None` parameter; learner randomly assigned WHITE or BLACK
-- Positions returned as `(features, color, is_learner)` 3-tuples
-- `td_update()` skips gradient updates on opponent positions but uses them as bootstrap targets
-- `train()` gains `past_opponent_freq` and `past_opponent_checkpoints` params; loads `.pt` files once before loop
-- Config: `PAST_OPPONENT_FREQ = 0.2`, `PAST_OPPONENT_CHECKPOINTS = [100, 200]`
-
-**10-game test tranche (games 996–1005) — promising early signal:**
-- **17/19 correct signs** at game 1005 — up from 15/19 at game 910 (had been stuck at 15/19 since game 200)
-- Three persistent wrong-sign features corrected: `center_control` (−0.017 → +0.059), `rook_open_file` (−0.030 → +0.058), `connected_rooks` (−0.023 → +0.011)
-- Still wrong: `bishop_pair` (−0.057), `isolated_pawn` (−0.004, borderline)
-- Decisive rate: 50% (5/10) — down from 78% in pre-patch games 946–995; likely noise at n=10 but worth monitoring
-- Weight changes are large (past-opponent games generate stronger TD signals than self-play, same effect as human play)
-
-### Scripts Changed
-
-| File | Change |
-|---|---|
-| `scripts/python/selfplay_nn.ipynb` | Implemented past-checkpoint opponent: `play_game()`, `td_update()`, `log_feature_stats()`, `log_position_logs()`, `train()`, config cell all updated |
-
-### Overnight Job
-
-- **NN self-play run_id=24**: RESUME=True, N_GAMES=250, PAST_OPPONENT_FREQ=0.2, checkpoints [100, 200]; started ~11pm
-- Latest model before overnight: `nn_run_24_game_994.pt`; overnight will resume from game 995+
-- Both checkpoint files confirmed present: `nn_run_24_game_100.pt`, `nn_run_24_game_200.pt`
-
-### Steps for Next Session
-
-1. **Assess overnight results** — check decisive rate, sign correctness, whether 17/19 holds after 250 more games
-2. **Run ELO benchmark on game 1005+ checkpoint** — real test of whether past-opponent mechanism improves external playing strength
-3. **Build `selfplay_sf_nn.ipynb`** — Stockfish teacher for the NN condition; mirrors `selfplay_nn.ipynb` but plays vs Stockfish at ELO 1320; TD(0)+Adam updates from those games
-4. **Play human games** via `07_human_play.R` with NN engine to inject novel positions
-5. **Reseed Supabase** — run `seed_supabase.R` to update run_id=3 (NN) with latest weights after overnight

@@ -1,6 +1,8 @@
-# Chess Learning — Project Memory
+| `README.md` | Public-facing GitHub readme |
+| `ChessLearningConversations.md` | Running transcript of RStudio Assistant conversations |
+| `PositronAssistantConversations.md` | Running transcript of Positron Assistant conversations |
 
-## Workspace Overview
+--- Overview
 
 This is the **Chess Learning** workspace, located at:
 `C:/Users/dkill/OneDrive/Documents/Chess Learning/`
@@ -83,7 +85,7 @@ To start a session:
 
 ---
 
-## Current Architecture (as of Session 21)
+## Current Architecture (as of Session 22)
 
 ### Engine (`scripts/python/engine.py`) — v2
 - **14 learnable positional features** (material features removed entirely)
@@ -139,6 +141,7 @@ Applied to: `king_safety` (× phase), `mobility` (× (0.5+0.5×phase)), `pawn_ad
 | 27 | 640 | 3 | **SF teacher** (`selfplay_sf_nn.ipynb`); TD(0)+Adam; fresh start | ELO ~1105 at games 110 & 390 (above run 24 peak); slipped to 1079 at game 440; material_queen +0.442; signs volatile 11–18/19 (peaked game 340) |
 | 28 | 10 | 3 | **Self-play v2** (`selfplay_nn_v2.ipynb`); AdamW + LR schedule + resignation | 11/19 signs; 50% draw rate (expected, fresh model); no resignations |
 | 29 | 10 | 3 | **SF teacher v2** (`selfplay_sf_nn_v2.ipynb`); AdamW + LR schedule + temperature + resignation | 12/19 signs at game 10 (vs run 27's 17/19); weaker start attributed to near-uniform temperature on fresh model |
+| 30 | 1+ | — | **MCTS v1** (`selfplay_mcts_v1.ipynb`); ValueNet(19); game-outcome replay buffer; N_SIMULATIONS=200 | Smoke test: draw, 602 halfmoves, 5.5 min/game; all features near zero (fresh model); overnight run N_GAMES=80 started midnight Oct 19 |
 
 ### engine_nn_v2.py — Stage 2–5 Engine (Session 21)
 
@@ -237,6 +240,10 @@ benchmark will use no move limit — chess rules only via claim_draw=True).
 | `scripts/python/selfplay_nn_v2.ipynb` | **New (Session 21)** — self-play + AdamW (weight_decay=1e-4) + MultiStepLR + resignation; run_id=28 |
 | `scripts/python/selfplay_sf_nn.ipynb` | **New (Session 21)** — SF teacher (Adam); chess-rules-only termination; run_id=27 |
 | `scripts/python/selfplay_sf_nn_v2.ipynb` | **New (Session 21)** — SF teacher + AdamW + MultiStepLR + temperature move selection + resignation; run_id=29 |
+| `scripts/python/selfplay_mcts_v1.ipynb` | **New (Session 22)** — Stage 2: MCTS + ValueNet(input_dim=19); game-outcome replay buffer; AdamW + MultiStepLR; N_SIMULATIONS=200; run_id=30 |
+| `scripts/python/selfplay_mcts_v2.ipynb` | **New (Session 22)** — Stage 3: MCTS + ValueNet(input_dim=768); bitboard input; 12 plane-aggregated attribution; run_id=31 |
+| `scripts/python/selfplay_mcts_v3.ipynb` | **New (Session 22)** — Stage 4: MCTS + DualNet(768); dual loss MSE+CE; policy targets = normalized visit counts; `policy_loss` in `game_records`; run_id=32 |
+| `scripts/python/selfplay_mcts_v4.ipynb` | **New (Session 22)** — Stage 5: MCTS + ResNet(768, 5 blocks, 128 filters); AlphaZero architecture; same dual loss as Stage 4; run_id=33 |
 | `scripts/python/engine_nn_v2.py` | **New (Session 21)** — Stage 2–5 engine: `board_to_tensor` (768-dim bitboard), `MCTSNode`, `mcts_search`, `ValueNet` (Stages 2–3), `DualNet` (Stage 4), `ResNet` (Stage 5); all 13 tests passing |
 | `scripts/python/update_v2_notebooks.py` | Utility: patches v2 notebooks with AlphaZero improvements |
 | `scripts/python/selfplay_td0.ipynb` | TD(0) self-play training; epsilon-greedy; v2 engine; current runs: 18 |

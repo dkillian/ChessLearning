@@ -99,7 +99,7 @@ Design decisions confirmed:
 ### Implementation Plan: `engine_nn_v2.py`
 
 **Location:** `scripts/python/engine_nn_v2.py`  
-**Purpose:** Engine for Stages 3–5. Replaces `engine_nn.py` for all MCTS notebooks.
+**Purpose:** Engine for Stages 2–5. Replaces `engine_nn.py` for all MCTS notebooks.
 
 #### `board_to_tensor(board)`
 - Returns `torch.FloatTensor` of shape `(768,)`
@@ -205,5 +205,5 @@ forward(x, legal_moves) -> (policy_probs, value)
 - `get_best_move(board, net)` signature is compatible with existing R reticulate call pattern
 
 ### Status at session end
-- Plan documented; no files written yet
-- RStudio Assistant to attempt implementation of `engine_nn_v2.py` first
+- Plan documented; `engine_nn_v2.py` written by RStudio Assistant — all 13 unit tests passing
+- Four MCTS notebooks (`selfplay_mcts_v1` through `v4`) not yet created
