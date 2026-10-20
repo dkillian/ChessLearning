@@ -21,13 +21,13 @@ library(reticulate)
 
 # ---- Configuration ----
 
-ENGINE_PATH      <- if (file.exists("../python/engine.py")) "../python" else "scripts/python"
+ENGINE_PATH      <- if (file.exists("../python/Temporal Difference/engine.py")) "../python/Temporal Difference" else "scripts/python/Temporal Difference"
 DEFAULT_SEED_RUN <- 18L   # fallback seed run shown in selector on first launch
 
 # ---- Python modules ----
 
 # Clear both cached engine modules so the app always loads latest from disk
-py_run_string("import sys; [sys.modules.pop(m, None) for m in ['engine', 'engine_learnable_material', 'engine_nn']]")
+py_run_string("import sys; [sys.modules.pop(m, None) for m in ['engine', 'engine_learnable_material', 'engine_nn', 'engine_nn_v2']]")
 
 chess_mod <- import("chess")
 chess_svg <- import("chess.svg")

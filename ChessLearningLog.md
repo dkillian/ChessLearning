@@ -2,6 +2,68 @@
 
 ---
 
+## Session 24 — October 20, 2026
+
+### Run 34 Assessment (Overnight Results)
+Run 34 completed at 1,323 games (was 520 at end of Session 23):
+- **Outcomes**: 0W / 63D / 1,260L (4.8% draw rate)
+- **Draw rate trajectory**: peaked at ~14% in games 51–100, declined monotonically to ~0% by game 1,200+
+- **Attribution weights**: rose from near-zero to ~0.8–1.3 around games 300–500, then collapsed back toward zero by game 800+
+- `VALUE_LOSS_WEIGHT = 2.0` added at game 521 had no visible effect on the collapse
+
+### AlphaZero Gap Analysis
+Compared current implementation against AlphaZero's training setup. Identified three actionable gaps:
+
+1. **Dirichlet noise at root** (most impactful) — absent in all prior runs; without it, MCTS visit counts concentrate on the same moves every position → policy collapses to near-deterministic mapping → representation collapse
+2. **LR resume bug** — on resume at game 521, `session_milestones = []` because both milestones (200, 500) were already passed; optimizer re-initialized at LR=1e-3 instead of the correct 1e-5; ran at 100× intended LR for rest of run 34
+3. **Temperature annealing absent** — τ=1 throughout; AlphaZero uses τ→0 after 30 moves for cleaner policy targets in known positions
+
+### Fixes Applied
+
+**`engine_nn_v2.py`** — added `add_dirichlet=False`, `dirichlet_alpha=0.3`, `dirichlet_epsilon=0.25` params to `mcts_search`; Dirichlet noise injected into root children priors after expansion; defaults False so benchmarking/human play unaffected
+
+**`stockfish_mcts_v4.ipynb`** (run 36 → 37) and **`selfplay_mcts_v4.ipynb`** (run 35):
+- Config: added `DIRICHLET_ALPHA=0.3`, `DIRICHLET_EPSILON=0.25`, `TEMP_THRESHOLD`, `OPTIM_PATH`
+- Network cell: LR now computed as `LR_GAMMA ** milestones_passed` from absolute milestone list; optimizer state saved/loaded via `OPTIM_PATH`
+- `play_game` / `play_game_vs_sf`: added ply counter; passes `temperature = TEMPERATURE if ply < TEMP_THRESHOLD else 0.0` and `add_dirichlet=True` to `mcts_search`
+- Training loop: saves `optimizer.state_dict()` to `OPTIM_PATH` at each checkpoint
+
+### Rename: `selfplay_sf_mcts_v4.ipynb` → `stockfish_mcts_v4.ipynb`
+Renamed for consistency with `selfplay_mcts_v4.ipynb`. All doc references updated.
+
+### Folder Reorganization: `scripts/python/`
+Split into two subfolders:
+- **`Temporal Difference/`**: `engine.py`, `engine_hardcoded_material.py`, `engine_learnable_material.py`, `engine_nn.py`, `engine.ipynb`, and all TD training notebooks (13 files)
+- **`Monte Carlo Tree Search/`**: `engine_nn_v2.py`, `make_sf_mcts_v4.py`, `update_v2_notebooks.py`, and all MCTS training notebooks (5 files)
+
+Path updates:
+- 19 notebooks: `../../data/` → `../../../data/`, `../../models` → `../../../models`
+- `05_stockfish_benchmark.R`: single `ENGINE_PATH` → `TD_PATH` + `MCTS_PATH`, selected by `ENGINE_MODULE`
+- `07_human_play.R`: `ENGINE_PATH` → `Temporal Difference/` subfolder; added `engine_nn_v2` to module cache-clear list
+- All file references in `AGENTS.md` and `ChessLearningDocumentation.md` updated
+
+### Run 36 — Stockfish Teacher with All Three Fixes (100 games)
+- **Outcomes**: 0W / 0D / 100L — zero draws, worse than run 34's early 14%
+- **Attribution weights**: near-zero throughout all 100 games (max 0.019 at game 10, ~0.0003 at game 100)
+- **Root cause identified**: temperature annealing (τ=0 after 30 plies) is harmful on a fresh network
+  - Fresh network → near-uniform visit counts after 200 MCTS sims
+  - τ=0 → one-hot policy target on whichever child marginally "won" the sim lottery
+  - One-hot targets on effectively random moves → large contradictory gradients → value head never gains traction
+  - Run 34 (τ=1 throughout, despite its LR bug) learned successfully because soft targets let value signal dominate
+- **Temperature annealing disabled**: `TEMP_THRESHOLD = 9999` in both `stockfish_mcts_v4.ipynb` and `selfplay_mcts_v4.ipynb`
+- **New run IDs**: stockfish → 37; selfplay → 35 (unchanged, not yet run)
+
+### Key Decision: Temperature Annealing Gate
+Temperature annealing (τ→0) should only be applied once MCTS visit counts are meaningfully informative — i.e., once the value head has learned enough to differentiate positions. On a fresh network, τ=1 throughout is correct. Plan: re-introduce annealing as a game-number-gated parameter (e.g., apply only after game 300) in a future run once run 37 validates the baseline.
+
+### Steps for Next Session
+1. **Assess run 37** (stockfish, 100-game tranche) — confirm attribution weights now rise as in run 34 but sustained; draw rate emerging?
+2. **Consider run 35** (self-play, short tranche) — parallel comparison once run 37 validates the fix
+3. **ELO benchmark run 37** — once draws/wins appear consistently
+4. **Re-introduce temperature annealing** with a game-number gate (e.g., `if game_number > 300 and ply >= TEMP_THRESHOLD`)
+
+---
+
 ## Run Registry
 
 Each new run is started when a substantive change is made to the training setup.
@@ -1601,7 +1663,7 @@ Draw collapse confirmed as architecture-independent. All four stages show the sa
 Also fixed `AttributeError` in v3: DualNet/ResNet return `(policy, value)` not `(value, policy)`. Resignation check `val_out, _ = net(...)` was assigning None to val_out. Fixed to `_, val_out = net(...)` plus `.squeeze().item()` in v3 and v4.
 
 #### Stockfish Teacher for MCTS v4 (run_id=34)
-Created `selfplay_sf_mcts_v4.ipynb` — ResNet + MCTS vs Stockfish at ELO 1320. Key design: engine positions only in replay buffer (MCTS visit counts → policy target; SF half-moves excluded). Same dual loss as v4 self-play.
+Created `stockfish_mcts_v4.ipynb` (originally `selfplay_sf_mcts_v4.ipynb`) — ResNet + MCTS vs Stockfish at ELO 1320. Key design: engine positions only in replay buffer (MCTS visit counts → policy target; SF half-moves excluded). Same dual loss as v4 self-play.
 
 **First 20-game tranche (run_id=34, games 1–20):**
 - 0W/20L vs SF1320 — expected cold start
@@ -1627,7 +1689,7 @@ Created `selfplay_sf_mcts_v4.ipynb` — ResNet + MCTS vs Stockfish at ELO 1320. 
 #### Infrastructure Updates
 - `05_stockfish_benchmark.R`: updated ENGINE_MODULE comment; added `mcts_sf_v*_run_*.pt` to model search candidates alongside `mcts_v*_run_*.pt`
 - `03_visualize.qmd`: default `show_runs` updated to include runs 30 and 31
-- `selfplay_sf_mcts_v4.ipynb`: created; make script `make_sf_mcts_v4.py` retained for reference
+- `stockfish_mcts_v4.ipynb`: created (renamed from `selfplay_sf_mcts_v4.ipynb`); make script `make_sf_mcts_v4.py` retained for reference
 - `scripts/r/ch08_blackjack.R` and `scripts/r/ch08_blackjack.qmd`: created from Chapter 8 of Rodriguez & Mendes (2018) — dealer hand simulations for Tables 8.1, 8.2, 8.4
 
 #### lc0 Installation

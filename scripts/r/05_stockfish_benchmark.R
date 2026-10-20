@@ -41,7 +41,9 @@ SF_PATH <- local({
     )
 })
 
-ENGINE_PATH <- if (file.exists("../python/engine.py")) "../python" else "scripts/python"
+TD_PATH     <- if (file.exists("../python/Temporal Difference/engine.py"))           "../python/Temporal Difference"           else "scripts/python/Temporal Difference"
+MCTS_PATH   <- if (file.exists("../python/Monte Carlo Tree Search/engine_nn_v2.py")) "../python/Monte Carlo Tree Search" else "scripts/python/Monte Carlo Tree Search"
+ENGINE_PATH <- if (ENGINE_MODULE == "engine_nn_v2") MCTS_PATH else TD_PATH
 
 chess_mod    <- import("chess")
 chess_pgn    <- import("chess.pgn")

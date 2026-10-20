@@ -87,9 +87,9 @@ To start a session:
 
 ---
 
-## Current Architecture (as of Session 23)
+## Current Architecture (as of Session 24)
 
-### Engine (`scripts/python/engine.py`) — v2
+### Engine (`scripts/python/Temporal Difference/engine.py`) — v2
 - **14 learnable positional features** (material features removed entirely)
 - **Material evaluation hard-coded** in `evaluate()` via `PIECE_VALUES` constant
   (queen=0.9, rook=0.5, bishop=0.3, knight=0.3, pawn=0.1 — scaled to TD target range)
@@ -110,7 +110,7 @@ Pawn advancement: `pawn_advancement` (total advancement of **all** pawns from st
 `_game_phase(board)` returns midgame fraction [0,1] from weighted piece count / 24 (Q=4, R=2, N/B=1).
 Applied to: `king_safety` (× phase), `mobility` (× (0.5+0.5×phase)), `pawn_advancement` (× (0.5+0.5×end)).
 
-### Training Script (`scripts/python/selfplay_td0.ipynb`)
+### Training Script (`scripts/python/Temporal Difference/selfplay_td0.ipynb`)
 - **Temporal difference (0) bootstrapping**: target for position t = `-V(s_{t+1})`; terminal uses actual outcome
 - **Per-feature draw LR scales**: `draw_lr_scales = {'king_safety': 0.05, 'center_control': 0.2}` — king_safety gets 5% LR during draws; center_control 20% (added run_id=14: center_control became top draw-gradient feature in run_id=13)
 - **`BASELINE_EVERY = None`** — random mover baseline disabled; engine wins 100% at all checkpoints (ceiling effect). Replace with Stockfish-at-low-ELO in future runs.
@@ -147,11 +147,14 @@ Applied to: `king_safety` (× phase), `mobility` (× (0.5+0.5×phase)), `pawn_ad
 | 31 | 80 | — | **MCTS v2** (`selfplay_mcts_v2.ipynb`); ValueNet(768); bitboard input | 100% draws; weights monotone → 0 (trivial solution); draw collapse architecture-independent |
 | 32 | 80 | — | **MCTS v3** (`selfplay_mcts_v3.ipynb`); DualNet(768); policy + value heads | 100% draws; policy loss ~3.0 (near-uniform); weights decline then slightly stabilize |
 | 33 | 80 | — | **MCTS v4** (`selfplay_mcts_v4.ipynb`); ResNet(768, 5 blocks, 128 filters) | 100% draws; 1.9 min/game (fastest); draw collapse confirmed across all 4 stages |
-| 34 | 520+ | — | **MCTS v4 SF teacher** (`selfplay_sf_mcts_v4.ipynb`); ResNet + MCTS vs SF1320; engine positions only; VALUE_LOSS_WEIGHT=2.0 (added game 521) | 0W/31D/489L at game 520; policy loss → 0.04 by game 200; draw rate non-monotonic (peak ~15% at game 75–100, trough 2–4%); overnight run (800 games) in progress |
+| 34 | 1323 | — | **MCTS v4 SF teacher** (`stockfish_mcts_v4.ipynb`); ResNet + MCTS vs SF1320; VALUE_LOSS_WEIGHT=2.0 (game 521+) | 0W/63D/1260L (4.8% draw rate); attribution peak ~0.9 games 80–100, collapsed by game 800; LR reset bug at game 521 |
+| 35 | — | — | **Self-play v2** (`selfplay_mcts_v4.ipynb`); Dirichlet noise (α=0.3, ε=0.25); LR resume fix; TEMP_THRESHOLD=9999 | Not yet run |
+| 36 | 100 | — | **SF teacher v2** (`stockfish_mcts_v4.ipynb`); same fixes as run 35 but with TEMP_THRESHOLD=30 | 0W/0D/100L; attribution near-zero throughout — temperature annealing identified as culprit |
+| 37 | — | — | **SF teacher v3** (`stockfish_mcts_v4.ipynb`); Dirichlet noise + LR fix + TEMP_THRESHOLD=9999 (annealing disabled) | Pending |
 
 ### engine_nn_v2.py — Stage 2–5 Engine (Session 21)
 
-**Location:** `scripts/python/engine_nn_v2.py`
+**Location:** `scripts/python/Monte Carlo Tree Search/engine_nn_v2.py`
 
 | Component | Description |
 |---|---|
@@ -238,29 +241,29 @@ benchmark will use no move limit — chess rules only via claim_draw=True).
 
 | File | Purpose |
 |------|---------|
-| `scripts/python/engine.py` | Importable module: 14-feature positional extractor (v2), linear evaluator with hard-coded material, negamax search with alpha-beta, `_game_phase()` helper |
-| `scripts/python/engine_hardcoded_material.py` | Archive of hardcoded-material engine condition (runs 1–19): 14 positional features, material hard-coded |
-| `scripts/python/engine_learnable_material.py` | Learnable-material engine condition (run 20+): 19 features — 5 material + 14 positional; no hard-coded piece values. **Session 16:** `knight_pst` replaced by `knight_outpost` (`_safe_knight_outpost()` — knights in opponent's half not attacked by opponent pawns) |
-| `scripts/python/engine_nn.py` | Neural net engine (run 24+): ChessNet MLP (19→32→1, tanh); `evaluate()`, `negamax()`, `get_best_move()`, `attribution_weights()` (dV/dx_i at starting position), `nn_td_update()` (R-friendly interface for reticulate), `model_to_b64()` / `model_from_b64()` for Supabase storage |
-| `scripts/python/selfplay_nn.ipynb` | TD(0)+Adam self-play training for NN condition; attribution weights logged; current runs: 24 |
-| `scripts/python/selfplay_nn_v2.ipynb` | **New (Session 21)** — self-play + AdamW (weight_decay=1e-4) + MultiStepLR + resignation; run_id=28 |
-| `scripts/python/selfplay_sf_nn.ipynb` | **New (Session 21)** — SF teacher (Adam); chess-rules-only termination; run_id=27 |
-| `scripts/python/selfplay_sf_nn_v2.ipynb` | **New (Session 21)** — SF teacher + AdamW + MultiStepLR + temperature move selection + resignation; run_id=29 |
-| `scripts/python/selfplay_mcts_v1.ipynb` | Stage 2: MCTS + ValueNet(input_dim=19); game-outcome replay buffer; AdamW + MultiStepLR; N_SIMULATIONS=200; run_id=30. **Session 23:** resignation added (threshold=0.9, consecutive=4); td_error logging fixed |
-| `scripts/python/selfplay_mcts_v2.ipynb` | Stage 3: MCTS + ValueNet(input_dim=768); bitboard input; 12 plane-aggregated attribution; run_id=31. **Session 23:** resignation + td_error fix |
-| `scripts/python/selfplay_mcts_v3.ipynb` | Stage 4: MCTS + DualNet(768); dual loss MSE+CE; policy targets = normalized visit counts; run_id=32. **Session 23:** resignation added; fixed `_, val_out = net(...)` unpacking (DualNet returns policy first) |
-| `scripts/python/selfplay_mcts_v4.ipynb` | Stage 5: MCTS + ResNet(768, 5 blocks, 128 filters); AlphaZero architecture; same dual loss; run_id=33. **Session 23:** resignation added; same unpacking fix as v3 |
-| `scripts/python/selfplay_sf_mcts_v4.ipynb` | **New (Session 23)** — MCTS v4 + Stockfish teacher; ResNet + MCTS vs SF1320; engine positions only in replay buffer; VALUE_LOSS_WEIGHT=2.0; run_id=34 |
-| `scripts/python/make_sf_mcts_v4.py` | **New (Session 23)** — Generation script for selfplay_sf_mcts_v4.ipynb |
-| `scripts/python/engine_nn_v2.py` | **New (Session 21)** — Stage 2–5 engine: `board_to_tensor` (768-dim bitboard), `MCTSNode`, `mcts_search`, `ValueNet` (Stages 2–3), `DualNet` (Stage 4), `ResNet` (Stage 5); all 13 tests passing |
-| `scripts/python/update_v2_notebooks.py` | Utility: patches v2 notebooks with AlphaZero improvements |
-| `scripts/python/selfplay_td0.ipynb` | TD(0) self-play training; epsilon-greedy; v2 engine; current runs: 18 |
-| `scripts/python/selfplay_learnable_material.ipynb` | TD(0) self-play training; learnable material condition; imports `engine_learnable_material`; current runs: 20 |
-| `scripts/python/selfplay_softmax.ipynb` | TD(0) self-play; softmax move selection (τ=0.05, top-10); current runs: 15 |
-| `scripts/python/selfplay_sf.ipynb` | **Stockfish teacher** (run_id=16): plays vs Stockfish at configurable ELO; run_id=16 showed ELO regression and only 7/14 correct signs — not continued since, but not closed off as a future approach |
-| `scripts/python/selfplay_td0_v1_runs1-14.ipynb` | Archived v1 TD(0) notebook (runs 1–14) |
-| `scripts/python/selfplay_softmax_v1_run15.ipynb` | Archived v1 softmax notebook (run 15) |
-| `scripts/python/selfplay_sf_v1_run16.ipynb` | Archived v1 Stockfish-teacher notebook (run 16) |
+| `scripts/python/Temporal Difference/engine.py` | Importable module: 14-feature positional extractor (v2), linear evaluator with hard-coded material, negamax search with alpha-beta, `_game_phase()` helper |
+| `scripts/python/Temporal Difference/engine_hardcoded_material.py` | Archive of hardcoded-material engine condition (runs 1–19): 14 positional features, material hard-coded |
+| `scripts/python/Temporal Difference/engine_learnable_material.py` | Learnable-material engine condition (run 20+): 19 features — 5 material + 14 positional; no hard-coded piece values. **Session 16:** `knight_pst` replaced by `knight_outpost` (`_safe_knight_outpost()` — knights in opponent's half not attacked by opponent pawns) |
+| `scripts/python/Temporal Difference/engine_nn.py` | Neural net engine (run 24+): ChessNet MLP (19→32→1, tanh); `evaluate()`, `negamax()`, `get_best_move()`, `attribution_weights()` (dV/dx_i at starting position), `nn_td_update()` (R-friendly interface for reticulate), `model_to_b64()` / `model_from_b64()` for Supabase storage |
+| `scripts/python/Temporal Difference/selfplay_nn.ipynb` | TD(0)+Adam self-play training for NN condition; attribution weights logged; current runs: 24 |
+| `scripts/python/Temporal Difference/selfplay_nn_v2.ipynb` | **New (Session 21)** — self-play + AdamW (weight_decay=1e-4) + MultiStepLR + resignation; run_id=28 |
+| `scripts/python/Temporal Difference/selfplay_sf_nn.ipynb` | **New (Session 21)** — SF teacher (Adam); chess-rules-only termination; run_id=27 |
+| `scripts/python/Temporal Difference/selfplay_sf_nn_v2.ipynb` | **New (Session 21)** — SF teacher + AdamW + MultiStepLR + temperature move selection + resignation; run_id=29 |
+| `scripts/python/Monte Carlo Tree Search/selfplay_mcts_v1.ipynb` | Stage 2: MCTS + ValueNet(input_dim=19); game-outcome replay buffer; AdamW + MultiStepLR; N_SIMULATIONS=200; run_id=30. **Session 23:** resignation added (threshold=0.9, consecutive=4); td_error logging fixed |
+| `scripts/python/Monte Carlo Tree Search/selfplay_mcts_v2.ipynb` | Stage 3: MCTS + ValueNet(input_dim=768); bitboard input; 12 plane-aggregated attribution; run_id=31. **Session 23:** resignation + td_error fix |
+| `scripts/python/Monte Carlo Tree Search/selfplay_mcts_v3.ipynb` | Stage 4: MCTS + DualNet(768); dual loss MSE+CE; policy targets = normalized visit counts; run_id=32. **Session 23:** resignation added; fixed `_, val_out = net(...)` unpacking (DualNet returns policy first) |
+| `scripts/python/Monte Carlo Tree Search/selfplay_mcts_v4.ipynb` | Stage 5: MCTS + ResNet(768, 5 blocks, 128 filters); AlphaZero architecture; same dual loss; run_id=33. **Session 23:** resignation added; same unpacking fix as v3 |
+| `scripts/python/Monte Carlo Tree Search/stockfish_mcts_v4.ipynb` | **New (Session 23)** — MCTS v4 + Stockfish teacher; ResNet + MCTS vs SF1320; engine positions only in replay buffer; VALUE_LOSS_WEIGHT=2.0; run_id=34+ |
+| `scripts/python/Monte Carlo Tree Search/make_sf_mcts_v4.py` | **New (Session 23)** — Generation script for stockfish_mcts_v4.ipynb (archived) |
+| `scripts/python/Monte Carlo Tree Search/engine_nn_v2.py` | **New (Session 21)** — Stage 2–5 engine: `board_to_tensor` (768-dim bitboard), `MCTSNode`, `mcts_search`, `ValueNet` (Stages 2–3), `DualNet` (Stage 4), `ResNet` (Stage 5); all 13 tests passing |
+| `scripts/python/Monte Carlo Tree Search/update_v2_notebooks.py` | Utility: patches v2 notebooks with AlphaZero improvements |
+| `scripts/python/Temporal Difference/selfplay_td0.ipynb` | TD(0) self-play training; epsilon-greedy; v2 engine; current runs: 18 |
+| `scripts/python/Temporal Difference/selfplay_learnable_material.ipynb` | TD(0) self-play training; learnable material condition; imports `engine_learnable_material`; current runs: 20 |
+| `scripts/python/Temporal Difference/selfplay_softmax.ipynb` | TD(0) self-play; softmax move selection (τ=0.05, top-10); current runs: 15 |
+| `scripts/python/Temporal Difference/selfplay_sf.ipynb` | **Stockfish teacher** (run_id=16): plays vs Stockfish at configurable ELO; run_id=16 showed ELO regression and only 7/14 correct signs — not continued since, but not closed off as a future approach |
+| `scripts/python/Temporal Difference/selfplay_td0_v1_runs1-14.ipynb` | Archived v1 TD(0) notebook (runs 1–14) |
+| `scripts/python/Temporal Difference/selfplay_softmax_v1_run15.ipynb` | Archived v1 softmax notebook (run 15) |
+| `scripts/python/Temporal Difference/selfplay_sf_v1_run16.ipynb` | Archived v1 Stockfish-teacher notebook (run 16) |
 
 ## R Analysis Scripts
 
@@ -281,8 +284,8 @@ benchmark will use no move limit — chess rules only via claim_draw=True).
 | `scripts/r/06_stockfish_arena.R` | Shiny app — Live Game (engine vs Stockfish) and ELO Benchmark read-only viewer (polls DB every 30s); run benchmarks via `05_stockfish_benchmark.R` |
 | `scripts/r/07_human_play.R` | Shiny app — Human vs engine with real TD(0) weight updates and post-game learning diagnostics; v2-aware: auto-detects active v2 human run or creates one seeded from `SEED_RUN_ID`; logs `engine_version` and `human_color`. **Session 18:** full NN support — engine_nn option in UI; separate `session_nn_model` / `session_nn_optimizer` reactives; `nn_td_update()` via reticulate; `.pt` checkpoint saved after each human game; Frobenius norm diagnostics (value box, norm vs self-play baseline, session norm history chart); NN-aware live feature table |
 | `public_app/app.R` | Crowdsourced human-vs-engine Shiny app for shinyapps.io; Supabase PostgreSQL backend; two conditions (hardcoded material run_id=1, learnable material run_id=2); chessboard.js drag-and-drop board; all DB calls wrapped in tryCatch (game-start crash fixed Session 19). Deploy via `rsconnect::deployApp(appDir="public_app", appName="chess-learning", appId=18172172L, account="dkillian", server="shinyapps.io", forceUpdate=TRUE)` |
-| `public_app/engine.py` | Copy of `engine.py` (v2, hardcoded material) for deployment — confirmed identical to `scripts/python/engine.py` |
-| `public_app/engine_learnable_material.py` | Copy of `engine_learnable_material.py` for deployment — confirmed identical to `scripts/python/engine_learnable_material.py` |
+| `public_app/engine.py` | Copy of `engine.py` (v2, hardcoded material) for deployment — confirmed identical to `scripts/python/Temporal Difference/engine.py` |
+| `public_app/engine_learnable_material.py` | Copy of `engine_learnable_material.py` for deployment — confirmed identical to `scripts/python/Temporal Difference/engine_learnable_material.py` |
 | `public_app/engine.py` | Copy of `engine.py` (v2) for deployment alongside `public_app/app.R` |
 
 ---

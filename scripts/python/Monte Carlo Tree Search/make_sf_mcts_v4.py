@@ -1,7 +1,7 @@
-"""One-time script: generates selfplay_sf_mcts_v4.ipynb"""
+"""One-time script: originally generated selfplay_sf_mcts_v4.ipynb (now stockfish_mcts_v4.ipynb)"""
 import json, os
 
-OUT = os.path.join(os.path.dirname(__file__), "selfplay_sf_mcts_v4.ipynb")
+OUT = os.path.join(os.path.dirname(__file__), "stockfish_mcts_v4.ipynb")
 
 def code_cell(src):
     return {"cell_type":"code","execution_count":None,"metadata":{},"outputs":[],"source":[src]}

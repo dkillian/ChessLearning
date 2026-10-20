@@ -452,33 +452,33 @@ Chess Learning/                                  ← Repo root
 
 | File | Description |
 |---|---|
-| `scripts/python/engine.py` | Importable module (hardcoded material): 14-feature positional extractor, linear evaluator with hard-coded material (`PIECE_VALUES`), negamax search with alpha-beta, `_game_phase()` helper. Used by hardcoded-material training notebooks. |
-| `scripts/python/engine_hardcoded_material.py` | Archive copy of `engine.py` as of the hardcoded-material condition (runs 1–19). Preserved as a research artifact. |
-| `scripts/python/engine_learnable_material.py` | Learnable material engine: 19 features — 5 material + 14 positional. `knight_pst` replaced by `knight_outpost` (`_safe_knight_outpost()`) from run_id=21. No hard-coded piece values. |
-| `scripts/python/engine_nn.py` | Neural net engine v1 (runs 24–26): ChessNet MLP (19→32→1, tanh); implements `evaluate()`, `negamax()`, `get_best_move()`, `attribution_weights()` (dV/dx_i at starting position), `nn_td_update()` (R-friendly interface for reticulate), `model_to_b64()` / `model_from_b64()` for Supabase storage. |
-| `scripts/python/engine_nn_v2.py` | Stage 2–5 engine (Session 21): `board_to_tensor()` (768-dim bitboard, 12 planes × 64 squares, White's perspective), `MCTSNode` (PUCT UCB; root pre-expanded), `mcts_search()` (`board_to_input` param for Stage 2 compatibility), `ValueNet` (Stages 2–3; `input_dim=19` or `768`), `DualNet` (Stage 4; policy head with masked softmax), `ResNet` (Stage 5; 5 residual blocks, 128 filters), `attribution_weights()` (plane-aggregated for 768-dim; `policy_top5` for Dual/ResNet). All 13 unit tests passing. |
-| `scripts/python/engine.ipynb` | Stage 01 notebook: same content as `engine.py` (v2 architecture) with markdown explanations and 6 verification checks. |
-| `scripts/python/selfplay_td0.ipynb` | Primary training script (hardcoded material): `play_game`, `td_update` (TD(0)), `train`; epsilon-greedy; SQLite logging. Configure via `RUN_ID`, `DEPTH`, `RESUME`, `N_GAMES`. |
-| `scripts/python/selfplay_learnable_material.ipynb` | Training script (learnable material): same structure as `selfplay_td0.ipynb`; imports `engine_learnable_material`. Configure via `RUN_ID`, `DEPTH`, `RESUME`, `N_GAMES`. |
-| `scripts/python/selfplay_nn.ipynb` | Neural net training v1: TD(0)+Adam; past-checkpoint opponent mechanism (`PAST_OPPONENT_FREQ`, `PAST_OPPONENT_CHECKPOINTS`); logs attribution weights to `weights` table. Configure via `RUN_ID`, `DEPTH`, `RESUME`, `N_GAMES`. |
-| `scripts/python/selfplay_nn_v2.ipynb` | Neural net self-play v2: AdamW (`weight_decay=1e-4`) + `MultiStepLR` (drops 10× at game milestones [200, 500]) + resignation (value ≤ −0.9 for 4 consecutive engine half-moves). Run 28+. |
-| `scripts/python/selfplay_sf_nn.ipynb` | Neural net SF teacher v1: plays vs Stockfish at configurable ELO; TD(0)+Adam; chess-rules-only termination (no move limit). Run 27+. |
-| `scripts/python/selfplay_sf_nn_v2.ipynb` | Neural net SF teacher v2: AdamW + `MultiStepLR` + temperature move selection (first 15 full moves) + resignation. Run 29+. |
-| `scripts/python/update_v2_notebooks.py` | Utility script: patches v2 notebooks with AlphaZero improvements via JSON editing. |
-| `scripts/python/selfplay_mcts_v1.ipynb` | Stage 2 MCTS training: `ValueNet(input_dim=19)` + `extract_features`; game-outcome training targets via replay buffer (deque 10k); AdamW + MultiStepLR; N_SIMULATIONS=200; run_id=30+. |
-| `scripts/python/selfplay_mcts_v2.ipynb` | Stage 3 MCTS training: `ValueNet(input_dim=768)` + `board_to_tensor`; 12 plane-aggregated attribution; run_id=31+. |
-| `scripts/python/selfplay_mcts_v3.ipynb` | Stage 4 MCTS training: `DualNet(768)`; dual loss MSE(value)+CE(policy); policy targets = normalized MCTS visit counts; `policy_loss` logged to `game_records`; run_id=32+. |
-| `scripts/python/selfplay_mcts_v4.ipynb` | Stage 5 MCTS training: `ResNet(768, n_filters=128, n_blocks=5)`; same dual loss and logging as Stage 4; AlphaZero architecture at small scale; run_id=33+. **Session 23:** resignation added; `_, val_out = net(...)` unpacking fix |
-| `scripts/python/selfplay_sf_mcts_v4.ipynb` | **New (Session 23)** — MCTS v4 + Stockfish teacher: ResNet + MCTS vs SF1320; engine positions only; dual loss; VALUE_LOSS_WEIGHT=2.0; scheduler.step() inside BATCH_SIZE guard; run_id=34+ |
-| `scripts/python/make_sf_mcts_v4.py` | **New (Session 23)** — Generation script for selfplay_sf_mcts_v4.ipynb |
+| `scripts/python/Temporal Difference/engine.py` | Importable module (hardcoded material): 14-feature positional extractor, linear evaluator with hard-coded material (`PIECE_VALUES`), negamax search with alpha-beta, `_game_phase()` helper. Used by hardcoded-material training notebooks. |
+| `scripts/python/Temporal Difference/engine_hardcoded_material.py` | Archive copy of `engine.py` as of the hardcoded-material condition (runs 1–19). Preserved as a research artifact. |
+| `scripts/python/Temporal Difference/engine_learnable_material.py` | Learnable material engine: 19 features — 5 material + 14 positional. `knight_pst` replaced by `knight_outpost` (`_safe_knight_outpost()`) from run_id=21. No hard-coded piece values. |
+| `scripts/python/Temporal Difference/engine_nn.py` | Neural net engine v1 (runs 24–26): ChessNet MLP (19→32→1, tanh); implements `evaluate()`, `negamax()`, `get_best_move()`, `attribution_weights()` (dV/dx_i at starting position), `nn_td_update()` (R-friendly interface for reticulate), `model_to_b64()` / `model_from_b64()` for Supabase storage. |
+| `scripts/python/Monte Carlo Tree Search/engine_nn_v2.py` | Stage 2–5 engine (Session 21): `board_to_tensor()` (768-dim bitboard, 12 planes × 64 squares, White's perspective), `MCTSNode` (PUCT UCB; root pre-expanded), `mcts_search()` (`board_to_input` param for Stage 2 compatibility), `ValueNet` (Stages 2–3; `input_dim=19` or `768`), `DualNet` (Stage 4; policy head with masked softmax), `ResNet` (Stage 5; 5 residual blocks, 128 filters), `attribution_weights()` (plane-aggregated for 768-dim; `policy_top5` for Dual/ResNet). All 13 unit tests passing. |
+| `scripts/python/Temporal Difference/engine.ipynb` | Stage 01 notebook: same content as `engine.py` (v2 architecture) with markdown explanations and 6 verification checks. |
+| `scripts/python/Temporal Difference/selfplay_td0.ipynb` | Primary training script (hardcoded material): `play_game`, `td_update` (TD(0)), `train`; epsilon-greedy; SQLite logging. Configure via `RUN_ID`, `DEPTH`, `RESUME`, `N_GAMES`. |
+| `scripts/python/Temporal Difference/selfplay_learnable_material.ipynb` | Training script (learnable material): same structure as `selfplay_td0.ipynb`; imports `engine_learnable_material`. Configure via `RUN_ID`, `DEPTH`, `RESUME`, `N_GAMES`. |
+| `scripts/python/Temporal Difference/selfplay_nn.ipynb` | Neural net training v1: TD(0)+Adam; past-checkpoint opponent mechanism (`PAST_OPPONENT_FREQ`, `PAST_OPPONENT_CHECKPOINTS`); logs attribution weights to `weights` table. Configure via `RUN_ID`, `DEPTH`, `RESUME`, `N_GAMES`. |
+| `scripts/python/Temporal Difference/selfplay_nn_v2.ipynb` | Neural net self-play v2: AdamW (`weight_decay=1e-4`) + `MultiStepLR` (drops 10× at game milestones [200, 500]) + resignation (value ≤ −0.9 for 4 consecutive engine half-moves). Run 28+. |
+| `scripts/python/Temporal Difference/selfplay_sf_nn.ipynb` | Neural net SF teacher v1: plays vs Stockfish at configurable ELO; TD(0)+Adam; chess-rules-only termination (no move limit). Run 27+. |
+| `scripts/python/Temporal Difference/selfplay_sf_nn_v2.ipynb` | Neural net SF teacher v2: AdamW + `MultiStepLR` + temperature move selection (first 15 full moves) + resignation. Run 29+. |
+| `scripts/python/Monte Carlo Tree Search/update_v2_notebooks.py` | Utility script: patches v2 notebooks with AlphaZero improvements via JSON editing. |
+| `scripts/python/Monte Carlo Tree Search/selfplay_mcts_v1.ipynb` | Stage 2 MCTS training: `ValueNet(input_dim=19)` + `extract_features`; game-outcome training targets via replay buffer (deque 10k); AdamW + MultiStepLR; N_SIMULATIONS=200; run_id=30+. |
+| `scripts/python/Monte Carlo Tree Search/selfplay_mcts_v2.ipynb` | Stage 3 MCTS training: `ValueNet(input_dim=768)` + `board_to_tensor`; 12 plane-aggregated attribution; run_id=31+. |
+| `scripts/python/Monte Carlo Tree Search/selfplay_mcts_v3.ipynb` | Stage 4 MCTS training: `DualNet(768)`; dual loss MSE(value)+CE(policy); policy targets = normalized MCTS visit counts; `policy_loss` logged to `game_records`; run_id=32+. |
+| `scripts/python/Monte Carlo Tree Search/selfplay_mcts_v4.ipynb` | Stage 5 MCTS training: `ResNet(768, n_filters=128, n_blocks=5)`; same dual loss and logging as Stage 4; AlphaZero architecture at small scale; run_id=33+. **Session 23:** resignation added; `_, val_out = net(...)` unpacking fix |
+| `scripts/python/Monte Carlo Tree Search/stockfish_mcts_v4.ipynb` | **New (Session 23)** — MCTS v4 + Stockfish teacher: ResNet + MCTS vs SF1320; engine positions only; dual loss; VALUE_LOSS_WEIGHT=2.0; scheduler.step() inside BATCH_SIZE guard; run_id=34+ |
+| `scripts/python/Monte Carlo Tree Search/make_sf_mcts_v4.py` | **New (Session 23)** — Generation script for stockfish_mcts_v4.ipynb (archived) |
 | `scripts/r/ch08_blackjack.R` | **New (Session 23)** — R code from Rodriguez & Mendes (2018) Ch. 8; dealer hand simulations Tables 8.1, 8.2, 8.4 |
 | `scripts/r/ch08_blackjack.qmd` | **New (Session 23)** — Quarto version with explanatory prose, comparison table, Exercise 13 |
-| `scripts/python/selfplay_softmax.ipynb` | Variant training script: softmax move selection (τ=0.05, top-10 candidates), style modifier presets (neutral/attacking/cautious/reckless/positional). |
-| `scripts/python/selfplay_sf.ipynb` | Stockfish-teacher variant (not continued since run_id=16): plays against Stockfish at configurable ELO, TD(0) updates, built-in ELO estimation. Windows asyncio fix included. Retained for reference. |
-| `scripts/python/selfplay_mc.ipynb` | Archived Monte Carlo version of the self-play loop. Superseded by TD(0). Retained for reference. |
-| `scripts/python/selfplay_td0_v1_runs1-14.ipynb` | Archived v1 TD(0) training notebook (runs 1–14). |
-| `scripts/python/selfplay_softmax_v1_run15.ipynb` | Archived v1 softmax training notebook (run 15). |
-| `scripts/python/selfplay_sf_v1_run16.ipynb` | Archived v1 Stockfish-teacher notebook (run 16). |
+| `scripts/python/Temporal Difference/selfplay_softmax.ipynb` | Variant training script: softmax move selection (τ=0.05, top-10 candidates), style modifier presets (neutral/attacking/cautious/reckless/positional). |
+| `scripts/python/Temporal Difference/selfplay_sf.ipynb` | Stockfish-teacher variant (not continued since run_id=16): plays against Stockfish at configurable ELO, TD(0) updates, built-in ELO estimation. Windows asyncio fix included. Retained for reference. |
+| `scripts/python/Temporal Difference/selfplay_mc.ipynb` | Archived Monte Carlo version of the self-play loop. Superseded by TD(0). Retained for reference. |
+| `scripts/python/Temporal Difference/selfplay_td0_v1_runs1-14.ipynb` | Archived v1 TD(0) training notebook (runs 1–14). |
+| `scripts/python/Temporal Difference/selfplay_softmax_v1_run15.ipynb` | Archived v1 softmax training notebook (run 15). |
+| `scripts/python/Temporal Difference/selfplay_sf_v1_run16.ipynb` | Archived v1 Stockfish-teacher notebook (run 16). |
 
 ### R Scripts
 

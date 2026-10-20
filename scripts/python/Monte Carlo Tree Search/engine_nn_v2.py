@@ -141,27 +141,34 @@ def _terminal_value(board: chess.Board) -> float:
 
 
 def mcts_search(
-    board:          chess.Board,
-    net:            nn.Module,
-    n_simulations:  int   = 200,
-    c_puct:         float = 1.4,
-    temperature:    float = 1.0,
-    board_to_input        = None,
+    board:             chess.Board,
+    net:               nn.Module,
+    n_simulations:     int   = 200,
+    c_puct:            float = 1.4,
+    temperature:       float = 1.0,
+    board_to_input           = None,
+    add_dirichlet:     bool  = False,
+    dirichlet_alpha:   float = 0.3,
+    dirichlet_epsilon: float = 0.25,
 ) -> tuple:
     """
     Run MCTS from *board* and return the selected move plus visit counts.
 
     Parameters
     ──────────
-    board         : current position (not modified).
-    net           : network with .policy_value(x, legal_moves) interface.
-    n_simulations : number of tree expansions per call.
-    c_puct        : exploration constant in the PUCT formula.
-    temperature   : 1.0 → sample proportional to visit counts (training);
-                    0.0 → argmax (evaluation / greedy).
-    board_to_input: function board -> tensor.  Defaults to board_to_tensor
-                    (768-dim bitboard).  Pass a custom function for Stage 2
-                    (19 hand-crafted features).
+    board             : current position (not modified).
+    net               : network with .policy_value(x, legal_moves) interface.
+    n_simulations     : number of tree expansions per call.
+    c_puct            : exploration constant in the PUCT formula.
+    temperature       : 1.0 → sample proportional to visit counts (training);
+                        0.0 → argmax (evaluation / greedy).
+    board_to_input    : function board -> tensor.  Defaults to board_to_tensor
+                        (768-dim bitboard).  Pass a custom function for Stage 2
+                        (19 hand-crafted features).
+    add_dirichlet     : if True, mix Dirichlet noise into root priors before
+                        search (use during training; disable during evaluation).
+    dirichlet_alpha   : concentration parameter — AlphaZero uses 0.3 for chess.
+    dirichlet_epsilon : noise fraction mixed into the prior — AlphaZero uses 0.25.
 
     Returns
     ───────
@@ -189,6 +196,11 @@ def mcts_search(
             for move, p in zip(legal_moves_root, policy_root.tolist()):
                 root.children[move] = MCTSNode(parent=root, prior=float(p))
         root.is_expanded = True
+        # ── Dirichlet noise at root (AlphaZero exploration; training only) ───
+        if add_dirichlet and root.children:
+            noise = np.random.dirichlet([dirichlet_alpha] * len(root.children))
+            for (move, child), eta in zip(root.children.items(), noise):
+                child.prior = (1 - dirichlet_epsilon) * child.prior + dirichlet_epsilon * eta
 
     for _ in range(n_simulations):
         node        = root
