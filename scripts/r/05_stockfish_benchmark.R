@@ -14,12 +14,14 @@ library(reticulate)
 
 # ---- Configuration ----
 
-RUN_ID        <- 27          # which run's weights to use
+RUN_ID        <- 34          # which run's weights to use
 CHECKPOINT    <- NULL        # NULL = latest checkpoint; or set an integer game number
 ELO_LEVELS    <- 1320        # Stockfish ELO levels to test (minimum is 1320)
 N_GAMES       <- 20          # games per ELO level (even number = balanced colours)
-DEPTH         <- 3L          # search depth for our engine
-ENGINE_MODULE <- "engine_nn" # "engine_learnable_material"  # "engine" (runs 1-19) | "engine_learnable_material" (run 20+) | "engine_nn" (run 22+)
+DEPTH         <- 3L          # search depth (linear/engine_nn engines only; ignored for MCTS)
+N_SIMULATIONS <- 200L        # MCTS simulations per move (engine_nn_v2 only)
+ENGINE_MODULE <- "engine_nn_v2" # "engine" (runs 1-19) | "engine_learnable_material" (run 20+) |
+                             # "engine_nn" (runs 24-29) | "engine_nn_v2" (MCTS runs 30+)
 
 # ---- Setup ----
 
@@ -61,7 +63,27 @@ if (is.null(CHECKPOINT)) {
                 as.integer(RUN_ID)))$gn
 }
 
-if (ENGINE_MODULE == "engine_nn") {
+if (ENGINE_MODULE == "engine_nn_v2") {
+    dbDisconnect(con)
+    # MCTS runs: try self-play naming (mcts_v1–v4) then SF-teacher naming (mcts_sf_v4)
+    mcts_candidates <- c(
+        file.path(MODEL_DIR, sprintf("mcts_v%d_run_%d.pt",    1:4, RUN_ID)),
+        file.path(MODEL_DIR, sprintf("mcts_sf_v%d_run_%d.pt", 1:4, RUN_ID))
+    )
+    model_path <- mcts_candidates[file.exists(mcts_candidates)][1]
+    if (is.na(model_path)) {
+        stop("Model file not found for run_id=", RUN_ID,
+             "\nLooked for mcts_v*_run_*.pt and mcts_sf_v*_run_*.pt in: ", MODEL_DIR)
+    }
+    # Determine net class from filename (v1/v2 = ValueNet; v3 = DualNet; v4 = ResNet)
+    net_class <- if (grepl("mcts_v[12]_", model_path)) engine_mod$ValueNet else
+                 if (grepl("mcts_v3_",    model_path)) engine_mod$DualNet  else
+                 engine_mod$ResNet
+    input_dim <- if (grepl("mcts_v1_", model_path)) 19L else 768L
+    engine_params <- engine_mod$load_model(model_path, net_class = net_class,
+                                           input_dim = input_dim)
+    cat(sprintf("Model loaded: %s\n", model_path))
+} else if (ENGINE_MODULE == "engine_nn") {
     dbDisconnect(con)
     # Try SF-teacher naming first (nn_sf_run_*), then self-play naming (nn_run_*)
     model_path <- file.path(MODEL_DIR, sprintf("nn_sf_run_%d_game_%d.pt", RUN_ID, CHECKPOINT))
@@ -134,7 +156,12 @@ play_one_game <- function(sf_inst, engine_color) {
 
     while (!board$is_game_over(claim_draw = TRUE)) {
         mv <- if (board$turn == engine_color) {
-            engine_mod$get_best_move(board, engine_params, DEPTH, FALSE)[[1]]
+            if (ENGINE_MODULE == "engine_nn_v2")
+                engine_mod$get_best_move(board, engine_params,
+                                         n_simulations = N_SIMULATIONS,
+                                         temperature   = 0.0)[[1]]
+            else
+                engine_mod$get_best_move(board, engine_params, DEPTH, FALSE)[[1]]
         } else {
             sf_inst$play(board, chess_engine$Limit(time = 0.5), ponder = FALSE)$move
         }

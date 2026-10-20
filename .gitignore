@@ -14,5 +14,11 @@ scripts/python/__pycache__/
 scripts/r/*.html
 scripts/r/*_files/
 
+# Large background PDFs (> 50MB)
+background/Reinforcement Learning.pdf
+
+# Quarto cache directories
+scripts/r/*_cache/
+
 # Scratch files
 nul

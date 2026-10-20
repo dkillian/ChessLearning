@@ -1,0 +1,352 @@
+---
+title: "Chapter 8: Blackjack"
+subtitle: "Rodriguez & Mendes (2018), *Probability, Decisions and Games*"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+execute:
+  echo: true
+  warning: false
+  message: false
+  fig.height: 4
+  fig.width: 5
+editor: source
+---
+
+```{r global_options, include=F, echo=F, error=F}
+library(here)
+library(knitr)
+getwd()
+source("../../../prep (May 2025).r")
+
+# Override default data frame printing to use flextable
+knit_print.data.frame <- function(x, ...) {
+  flextable(x) |> knit_print()
+}
+registerS3method("knit_print", "data.frame", knit_print.data.frame)
+```
+
+## 8.1 Rules and Bets
+
+Blackjack (also called 21) is played with a standard 52-card deck. Players try to reach a hand total closer to 21 than the dealer's without exceeding it. Card values:
+
+- Numbered cards: face value
+- Jack, Queen, King: 10 points each
+- Ace: 1 or 11 points (whichever is more advantageous)
+
+The dealer plays a fixed strategy: hit until the hand totals 17 or more, then stay. Each player resolves their hand before the dealer plays. Key player options are **hit**, **stay**, **double-down**, **split**, **surrender**, and **insurance**.
+
+## 8.2 Basic Strategy in Blackjack
+
+Because the dealer plays a fixed strategy and shows one card face-up, the player can adapt accordingly. Additionally, cards are dealt without replacement from a shared deck, so outcomes across rounds are *dependent* — unlike roulette or craps.
+
+### Dealer hand probabilities (multiple decks)
+
+The following simulation estimates the probability of each possible dealer outcome assuming sampling with replacement (approximating a large number of decks).
+
+```{r}
+#| label: tbl-8_1code
+
+set.seed(8675)
+n          <- 100000
+cardvalues <- rep(c(seq(1, 10), rep(10, 3)), each = 4)   # J/Q/K = 10; Ace = 1
+outcome    <- rep(0, n)
+
+for (i in 1:n) {
+  hand <- sample(cardvalues, 2, replace = TRUE)
+  sw   <- TRUE
+
+  while (sw) {
+    isace <- (hand == 1)
+
+    if (sum(isace) > 0) {
+      # Use Ace as 11 if it doesn't bust, otherwise as 1
+      if (sum(hand[!isace]) + sum(isace) + 10 > 21) {
+        handvalue <- sum(hand[!isace]) + sum(isace)
+      } else {
+        handvalue <- sum(hand[!isace]) + sum(isace) + 10
+      }
+    } else {
+      handvalue <- sum(hand)
+    }
+
+    if (handvalue >= 17) {
+      sw <- FALSE
+    } else {
+      hand <- c(hand, sample(cardvalues, 1))
+    }
+  }
+
+  if (handvalue > 21) {
+    outcome[i] <- "Bust"
+  } else if (handvalue == 21 & length(hand) == 2) {
+    outcome[i] <- "Blackjack!"
+  } else {
+    outcome[i] <- handvalue
+  }
+}
+```
+
+```{r}
+#| label: tbl-8_1
+#| tbl-cap: "Dealer hand probabilities"
+
+outcomes <- outcome %>%
+    table() %>%
+    proportions() %>%
+    round(3) %>%
+    as.data.frame() %>%
+    setNames(c("Outcome", "Probability")) %>%
+    mutate(Probability = scales::percent(Probability, accuracy = 0.1))
+
+outcomes %>%
+    flextable() 
+```
+
+Key takeaways from table 8.1:
+
+- The dealer busts roughly **28% of the time** — about once every four rounds
+- A hand of 20 is the most common non-bust outcome (~18%)
+- This suggests a defensive player strategy can be profitable when the dealer is likely to bust
+
+### Conditional probabilities by face-up card
+
+The simulation above ignores the information available from the dealer's face-up card. We can simulate hand probabilities conditional on the dealer's card facing up. 
+
+```{r}
+#| label: tbl-8_2code
+#| cache: true
+
+set.seed(5512)
+n          <- 50000
+cardvalues <- rep(c(seq(1, 10), rep(10, 3)), each = 4)
+
+sim_conditional <- function(face_up, n, cardvalues) {
+  outcomes <- character(n)
+  for (i in 1:n) {
+    hole <- sample(cardvalues, 1)
+    hand <- c(face_up, hole)
+    if ((face_up == 1 & hole == 10) | (face_up == 10 & hole == 1)) {
+      outcomes[i] <- "BJ"; next
+    }
+    sw <- TRUE
+    while (sw) {
+      isace <- (hand == 1)
+      if (sum(isace) > 0) {
+        handvalue <- if (sum(hand[!isace]) + sum(isace) + 10 > 21)
+          sum(hand[!isace]) + sum(isace) else sum(hand[!isace]) + sum(isace) + 10
+      } else {
+        handvalue <- sum(hand)
+      }
+      if (handvalue >= 17) sw <- FALSE
+      else hand <- c(hand, sample(cardvalues, 1))
+    }
+    outcomes[i] <- if (handvalue > 21) "Bust" else as.character(handvalue)
+  }
+  outcomes
+}
+
+lvls <- c("17", "18", "19", "20", "21", "BJ", "Bust")
+
+ot <- mapply(\(fv, lab) {
+  out <- sim_conditional(fv, n, cardvalues)
+  c(`Face-up` = lab, round(table(factor(out, levels = lvls)) / n, 3))
+}, c(1, 2:9, 10), c("A", as.character(2:9), "10/J/Q/K"),
+SIMPLIFY = FALSE) |>
+  do.call(rbind, args = _) |>
+  as.data.frame() 
+
+
+```
+
+```{r}
+#| label:   Table-8_2
+#| tbl-cap: "Dealer hand probabilities conditional on face-up card"
+
+outcomes8.2 <- ot %>%
+    as.data.frame()
+
+outcomes8.2 %>%
+    flextable()
+```
+
+The bust probability is substantially higher when the face-up card is 4, 5, or 6, and lower when it is 7 or above. This motivates the **basic strategy**:
+
+| Dealer's face-up card | Player's recommended action |
+|---|---|
+| 4, 5, or 6 | Stay with 12 or more (very defensive) |
+| 2 or 3 | Stay with 13 or more |
+| 7 or higher (or Ace) | Stay with 17 or more; hit otherwise |
+
+The rationale: when the dealer shows a low card, the most likely scenario is the dealer drawing to a stiff hand (12–16) and then busting on the next card. Playing defensively avoids the player also busting.
+
+## 8.3 A Gambling System That Works: Card Counting
+
+A critical feature of blackjack is that cards are **not reshuffled between rounds**. The composition of the remaining deck changes throughout a shoe, which can shift probabilities substantially.
+
+### Effect of a depleted deck
+
+To illustrate, consider a single deck from which all Aces and 2–6s have been removed, leaving only 28 cards (7s, 8s, 9s, and 10-valued cards). Since there are no low cards to rescue a stiff hand, the dealer's outcome distribution changes dramatically.
+
+```{r}
+#| label: tbl-8_4-code
+set.seed(3091)
+n          <- 100000
+cardvalues <- rep(c(seq(7, 10), rep(10, 3)), each = 4)   # 28 cards remaining
+tab8.4    <- rep(0, n)
+
+for (i in 1:n) {
+  shuffleddeck <- sample(cardvalues, length(cardvalues), replace = FALSE)
+  hand         <- shuffleddeck[1:2]
+  currentcard  <- 3
+  sw           <- TRUE
+
+  while (sw) {
+    isace <- (hand == 1)   # no Aces in depleted deck; retained for generality
+
+    if (sum(isace) > 0) {
+      if (sum(hand[!isace]) + sum(isace) + 10 > 21) {
+        handvalue <- sum(hand[!isace]) + sum(isace)
+      } else {
+        handvalue <- sum(hand[!isace]) + sum(isace) + 10
+      }
+    } else {
+      handvalue <- sum(hand)
+    }
+
+    if (handvalue >= 17) {
+      sw <- FALSE
+    } else {
+      hand        <- c(hand, shuffleddeck[currentcard])
+      currentcard <- currentcard + 1
+    }
+  }
+
+  if (handvalue > 21) {
+    tab8.4[i] <- "Bust"
+  } else if (handvalue == 21 & length(hand) == 2) {
+    tab8.4[i] <- "BJ"
+  } else {
+    tab8.4[i] <- handvalue
+  }
+}
+```
+
+```{r}
+#| label: tbl-8_4
+#| tbl-cap: "Hand probability, single deck, dealer stays, Aces, 2s–6s removed"
+
+outcomes8.4 <- tab8.4 %>%
+    table() %>%
+    proportions() %>%
+    round(3) %>%
+    as.data.frame() %>%
+    setNames(c("Outcome", "Probability")) %>%
+    mutate(Probability = scales::percent(Probability, accuracy = 0.1))
+
+outcomes8.4 %>%
+    flextable() 
+```
+
+This reproduces **Table 8.4**. Comparing against the full-deck simulation:
+
+| Outcome | Full deck (Table 8.1) | Depleted deck (Table 8.4) |
+|---|---|---|
+| 17 | 0.145 | 0.212 |
+| 18 | 0.140 | 0.186 |
+| 19 | 0.134 | 0.170 |
+| 20 | 0.180 | 0.317 |
+| 21 | 0.073 | 0.001 |
+| BJ | 0.047 | 0.000 |
+| Bust | 0.282 | 0.115 |
+
+With all low cards gone: bust rate falls from 28% to 12%, and 20 becomes the dominant outcome (32%). The player's optimal strategy shifts accordingly.
+
+### The Hi-Lo card counting system
+
+Card counting exploits the changing deck composition by tracking which cards have been played. The simplest system in practice is the **Hi-Lo count**:
+
+| Cards | Count adjustment |
+|---|---|
+| 2, 3, 4, 5, 6 | +1 |
+| 7, 8, 9 | 0 |
+| 10, J, Q, K, A | −1 |
+
+A high count signals many high cards remaining, which benefits the player (higher probability of dealer busting, higher probability of natural blackjack at 3:2 payout). One threshold strategy for single-deck games:
+
+| Count | Bet multiplier |
+|---|---|
+| ≤ +1 | 1× (table minimum) |
+| +2 to +3 | 2× |
+| +4 to +5 | 3× |
+| +6 to +7 | 4× |
+| +8 or more | 5× |
+
+## 8.4 Exercises
+
+Selected R exercises from the chapter:
+
+**Exercise 13** — Modify the Section 8.2 simulation to use a single deck with sampling *without* replacement:
+
+```{r}
+#| code-fold: true
+#| code-summary: "Exercise 13 solution"
+set.seed(2241)
+n          <- 100000
+cardvalues <- rep(c(seq(1, 10), rep(10, 3)), each = 4)
+outcome    <- rep(0, n)
+
+for (i in 1:n) {
+  shuffleddeck <- sample(cardvalues, length(cardvalues), replace = FALSE)
+  hand         <- shuffleddeck[1:2]
+  currentcard  <- 3
+  sw           <- TRUE
+
+  while (sw) {
+    isace <- (hand == 1)
+    if (sum(isace) > 0) {
+      if (sum(hand[!isace]) + sum(isace) + 10 > 21) {
+        handvalue <- sum(hand[!isace]) + sum(isace)
+      } else {
+        handvalue <- sum(hand[!isace]) + sum(isace) + 10
+      }
+    } else {
+      handvalue <- sum(hand)
+    }
+    if (handvalue >= 17) {
+      sw <- FALSE
+    } else {
+      hand        <- c(hand, shuffleddeck[currentcard])
+      currentcard <- currentcard + 1
+    }
+  }
+
+  if (handvalue > 21) {
+    outcome[i] <- "Bust"
+  } else if (handvalue == 21 & length(hand) == 2) {
+    outcome[i] <- "BJ"
+  } else {
+    outcome[i] <- handvalue
+  }
+}
+```
+
+```{r}
+#| label: tbl-8_5
+#| tbl-cap: "Hand probability, single deck, dealer stays, Aces, 2s–6s removed"
+
+outcomes8.4 <- tab8.4 %>%
+    table() %>%
+    proportions() %>%
+    round(3) %>%
+    as.data.frame() %>%
+    setNames(c("Outcome", "Probability")) %>%
+    mutate(Probability = scales::percent(Probability, accuracy = 0.1))
+
+outcomes8.4 %>%
+    flextable() 
+```
+
+The single-deck results differ slightly from Table 8.1 because removing each card meaningfully changes the remaining composition.

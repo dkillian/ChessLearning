@@ -15,7 +15,7 @@ execute:
   warning: false
   message: false
 params:
-  show_runs: "18,20,21"   # comma-separated run IDs; "all" to show everything
+  show_runs: "18,20,21,30,31"   # comma-separated run IDs; "all" to show everything
 ---
 
 ```{r global_options, include=F, warning=F, message=F, echo=F, error=F, fig.height=3, fig.width=5}

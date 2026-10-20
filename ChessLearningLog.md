@@ -1511,3 +1511,135 @@ ELO declining despite attribution metrics improving — classic self-play collap
 4. **Write `selfplay_mcts_v1.ipynb`** (Stage 2) — MCTS + `ValueNet(input_dim=19)` + replay buffer; coordinate with Positron assistant
 5. **Update `05_stockfish_benchmark.R`** for `engine_nn_v2` module name
 6. **Assess run 27 game 640 ELO** — no benchmark taken past game 440; run one before continuing
+
+## Session 23 — October 19, 2026
+
+### Overview
+Assessed the MCTS v1 overnight run (run_id=30, 80 games). Found the draw collapse problem persists under MCTS. Fixed two bugs across all four MCTS notebooks, added resignation logic, installed lc0, and started an 80-game v2 (bitboard ValueNet) tranche.
+
+### Key Findings
+
+**run_id=30 (MCTS v1, 80 games) — draw collapse confirmed:**
+- 80/81 games drawn (98.8% draw rate); 1 decisive game (1-0)
+- 10/19 correct feature signs at game 80 — essentially chance level
+- Median game length 311 halfmoves (min 73, max 828); all terminated "natural"
+- Material weights (queen, rook) both negative and drifting wrong direction
+- Weight trajectories look like random walks — no directional learning signal
+- Root cause: near-uniform value net → MCTS finds repetitions efficiently → game-outcome replay with ~0 draw targets → near-zero gradients → net cannot bootstrap out
+- Same draw-equilibrium problem as MC era (runs 1–4), now amplified by MCTS efficiency
+
+**run_id=31 (MCTS v2, ValueNet(768), bitboard — tranche in progress):**
+- 80-game tranche started ~5:45 AM; at game 64 at 7:30 AM (2.3 min/game)
+- 100% draw rate through game 64 — expected with all-draw training signal and near-zero values
+- No resignations yet (threshold −0.9 not reachable from near-zero fresh model)
+- Estimated ~game 74 at session end (8 AM)
+- Resume with RESUME=True next session
+
+### Bugs Fixed
+
+**Bug 1: `td_error` logging NULL in v1 and v2**
+- `log_game()` inserted into `game_records` with only `(run_id, game_number, pgn)` — never wrote `td_error`
+- The `loss` variable was computed in the training loop but not passed to `log_game()`
+- Fix: added `loss=None` parameter to `log_game()`; INSERT now includes `td_error` column
+- Applied to: `selfplay_mcts_v1.ipynb` (earlier in session), `selfplay_mcts_v2.ipynb` (combined with resignation patch)
+
+**Bug 2: Resignation logic missing from all four MCTS notebooks**
+- v1–v4 were missing resignation entirely (only existed in `selfplay_nn_v2.ipynb` and `selfplay_sf_nn_v2.ipynb`)
+- Added to all four: threshold=0.9, consecutive=4 half-moves (matching TD v2 convention)
+- Implementation: check fires before position appended to training examples; net call uses `.item()` for v1/v2 (ValueNet scalar), `val_out, _ = net(...)` for v3/v4 (DualNet/ResNet tuple)
+- `log_game()` updated in all four to accept `terminated_by` and `resigned_turn`; outcome string now derived from `resigned_turn` on resignation rather than `board.result()`
+- `terminated_by` now written to `games` table (was hardcoded `"natural"` before)
+- v2 also received `td_error` fix simultaneously
+
+### Tools & Infrastructure
+
+**lc0 v0.32.1 installed:**
+- Downloaded NVIDIA GPU build (CUDA 12); extracted to `C:\lc0\`
+- Bundled weights file: `791556.pb.gz` (strong network, ~2400+ ELO)
+- Usage: `chess.engine.SimpleEngine.popen_uci(["C:/lc0/lc0.exe", "--weights=C:/lc0/791556.pb.gz"])`
+- Maia weights (human-like, ELO-targeted): available at GitHub releases — maia-1100 through maia-1900
+- **Important:** Maia should NOT be used as training teacher — `nodes=1` design means it predicts human moves rather than trying to win; noisy training signal
+
+### Leela Chess Zero Discussion
+
+- lc0 can serve as flexible benchmark: `nodes=N` gives precise strength control, below Stockfish's 1320 floor
+- Key reference: McGrath et al. PNAS 2022 — "Acquisition of Chess Knowledge in AlphaZero" — directly studies concept acquisition sequence in AlphaZero-style training; this is our central research question
+- Potential LCZero contribution: apply our linear feature probe to LCZero public training checkpoints (T-series); test whether concept acquisition order is reproducible across architectures
+- Network visualization identified as the most natural code contribution to LCZero community
+
+### Scripts Changed
+
+| File | Change |
+|---|---|
+| `scripts/python/selfplay_mcts_v1.ipynb` | Fixed `td_error` NULL logging; added resignation (threshold=0.9, consecutive=4) |
+| `scripts/python/selfplay_mcts_v2.ipynb` | Fixed `td_error` NULL logging; added resignation |
+| `scripts/python/selfplay_mcts_v3.ipynb` | Added resignation (DualNet: `val_out, _ = net(...)`) |
+| `scripts/python/selfplay_mcts_v4.ipynb` | Added resignation (ResNet: same as v3) |
+
+### Steps for Next Session
+
+1. **Assess run_id=31** (v2 tranche) — draw rate, any resignations post-training-start, weight signs
+2. **Continue run_id=31** with `RESUME=True` if 80 games not complete
+3. **Run v3 tranche** (run_id=32, DualNet, policy head) as a standalone session
+4. **Read McGrath et al. PNAS 2022** — "Acquisition of Chess Knowledge in AlphaZero" — compare their concept ordering to our feature weight trajectories
+5. **Consider lc0 as benchmark** at nodes=10 or nodes=50 once run_id=31 has learnable weights
+
+### Additional Session 23 Work (continued after initial log entry)
+
+#### MCTS v2, v3, v4 Baseline Tranches
+Ran 80-game tranches for all remaining MCTS stages to complete the baseline:
+
+| Run | Net | Draw rate | Med ply | Mean min/game | Weight dynamics | Policy loss |
+|-----|-----|-----------|---------|---------------|-----------------|-------------|
+| 30 (v1) | ValueNet(19) | 98.8% | 291 | 2.2 | Random walk | — |
+| 31 (v2) | ValueNet(768) | 100% | 370 | 2.4 | Monotone → 0 | — |
+| 32 (v3) | DualNet(768) | 100% | 330 | 2.7 | Decline, stabilizes | ~3.0 |
+| 33 (v4) | ResNet(768) | 100% | 264 | 1.9 | Fluctuates ~0.06 | ~2.9–3.1 |
+
+Draw collapse confirmed as architecture-independent. All four stages show the same root cause: near-uniform value net → MCTS exploits repetitions → all-draw replay buffer → near-zero gradients → trivial solution. Policy head in v3/v4 provides slightly different gradient dynamics but no decisive games.
+
+Also fixed `AttributeError` in v3: DualNet/ResNet return `(policy, value)` not `(value, policy)`. Resignation check `val_out, _ = net(...)` was assigning None to val_out. Fixed to `_, val_out = net(...)` plus `.squeeze().item()` in v3 and v4.
+
+#### Stockfish Teacher for MCTS v4 (run_id=34)
+Created `selfplay_sf_mcts_v4.ipynb` — ResNet + MCTS vs Stockfish at ELO 1320. Key design: engine positions only in replay buffer (MCTS visit counts → policy target; SF half-moves excluded). Same dual loss as v4 self-play.
+
+**First 20-game tranche (run_id=34, games 1–20):**
+- 0W/20L vs SF1320 — expected cold start
+- 100% decisive — training signal is non-zero for first time in MCTS runs
+- Policy loss: 2.38 → 0.42 in 20 games (strong early signal)
+- Attribution weights: near-zero (value head outputting ~−1 for all positions)
+
+**500-game tranche (run_id=34, games 21–520):**
+- 0W/31D/489L vs SF1320 (6% draw rate, no wins)
+- Policy loss collapsed to ~0.04 by game 200, stable thereafter (policy head converged)
+- Attribution weights: collapsed near zero games 20–60, recovered and stabilized at 0.8–1.1 from game 80+
+- Draw rate non-monotonic: peaked ~15% near games 75–100, troughed 2–4% mid-training, partially recovered ~10% near game 500
+- Value head not differentiating positions aggressively enough — draws appear accidental (repetitions/stalemate), not earned
+
+**Changes made before overnight run:**
+- Added `VALUE_LOSS_WEIGHT = 2.0` config param; `train_step` updated to `loss = (2 × value_loss + policy_loss) / n`
+- Fixed `scheduler.step()` ordering warning: moved inside BATCH_SIZE guard so it only fires after `optimizer.step()` has run
+
+**Overnight run (game 521+):**
+- N_GAMES = 800, RESUME = True
+- Running at ~0.4 min/game; estimated completion by 7 AM
+
+#### Infrastructure Updates
+- `05_stockfish_benchmark.R`: updated ENGINE_MODULE comment; added `mcts_sf_v*_run_*.pt` to model search candidates alongside `mcts_v*_run_*.pt`
+- `03_visualize.qmd`: default `show_runs` updated to include runs 30 and 31
+- `selfplay_sf_mcts_v4.ipynb`: created; make script `make_sf_mcts_v4.py` retained for reference
+- `scripts/r/ch08_blackjack.R` and `scripts/r/ch08_blackjack.qmd`: created from Chapter 8 of Rodriguez & Mendes (2018) — dealer hand simulations for Tables 8.1, 8.2, 8.4
+
+#### lc0 Installation
+- lc0 v0.32.1 (NVIDIA GPU/CUDA 12) installed to `C:\lc0\`
+- Bundled weights: `791556.pb.gz`
+- Maia weights discussed: github.com/CSSLab/maia-chess releases; maia-1200/1300 most relevant for our ELO range
+- **Key note:** Maia NOT recommended as training teacher (nodes=1 design → move predictor, not win-seeking)
+- McGrath et al. PNAS 2022 ("Acquisition of Chess Knowledge in AlphaZero") identified as central scientific reference
+- Network visualization identified as natural LCZero community contribution
+
+### Steps for Next Session
+1. **Assess run_id=34 overnight results** — draw rate trend post-game 521, wins appearing?
+2. **Human play for MCTS v4** — needs MCTS move selection, ResNet TD update in `engine_nn_v2.py`, updated attribution display in `07_human_play.R`
+3. **Public app update** — add MCTS v4 condition alongside existing conditions
+4. **ELO benchmark** — only once engine earns first draw/win from a non-accidental position

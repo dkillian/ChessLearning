@@ -3,7 +3,7 @@
 **Activity**: Learning Study
 **Workspace**: Chess Learning
 **Initialized**: September 29, 2026
-**Status**: Active — Session 21; run_id=24 (NN self-play, 1305 games) closed — ELO collapsed to ~982 (self-play collapse confirmed); run_id=27 (SF teacher, Adam, 640 games) ELO peaked ~1105; runs 28–29 (AdamW v2 notebooks) 10-game test tranches complete; `engine_nn_v2.py` implemented and tested (Stages 2–5, 13/13 checks passing).
+**Status**: Active — Session 23; MCTS baseline (runs 30–33) complete — draw collapse confirmed across all four stages (ValueNet-19, ValueNet-768, DualNet, ResNet); MCTS v4 SF teacher (run_id=34) running overnight (game 521+, VALUE_LOSS_WEIGHT=2.0, N_GAMES=800 tranche). lc0 v0.32.1 installed to `C:\lc0\`. Next: human play + public app for MCTS v4.
 
 ---
 
@@ -468,7 +468,11 @@ Chess Learning/                                  ← Repo root
 | `scripts/python/selfplay_mcts_v1.ipynb` | Stage 2 MCTS training: `ValueNet(input_dim=19)` + `extract_features`; game-outcome training targets via replay buffer (deque 10k); AdamW + MultiStepLR; N_SIMULATIONS=200; run_id=30+. |
 | `scripts/python/selfplay_mcts_v2.ipynb` | Stage 3 MCTS training: `ValueNet(input_dim=768)` + `board_to_tensor`; 12 plane-aggregated attribution; run_id=31+. |
 | `scripts/python/selfplay_mcts_v3.ipynb` | Stage 4 MCTS training: `DualNet(768)`; dual loss MSE(value)+CE(policy); policy targets = normalized MCTS visit counts; `policy_loss` logged to `game_records`; run_id=32+. |
-| `scripts/python/selfplay_mcts_v4.ipynb` | Stage 5 MCTS training: `ResNet(768, n_filters=128, n_blocks=5)`; same dual loss and logging as Stage 4; AlphaZero architecture at small scale; run_id=33+. |
+| `scripts/python/selfplay_mcts_v4.ipynb` | Stage 5 MCTS training: `ResNet(768, n_filters=128, n_blocks=5)`; same dual loss and logging as Stage 4; AlphaZero architecture at small scale; run_id=33+. **Session 23:** resignation added; `_, val_out = net(...)` unpacking fix |
+| `scripts/python/selfplay_sf_mcts_v4.ipynb` | **New (Session 23)** — MCTS v4 + Stockfish teacher: ResNet + MCTS vs SF1320; engine positions only; dual loss; VALUE_LOSS_WEIGHT=2.0; scheduler.step() inside BATCH_SIZE guard; run_id=34+ |
+| `scripts/python/make_sf_mcts_v4.py` | **New (Session 23)** — Generation script for selfplay_sf_mcts_v4.ipynb |
+| `scripts/r/ch08_blackjack.R` | **New (Session 23)** — R code from Rodriguez & Mendes (2018) Ch. 8; dealer hand simulations Tables 8.1, 8.2, 8.4 |
+| `scripts/r/ch08_blackjack.qmd` | **New (Session 23)** — Quarto version with explanatory prose, comparison table, Exercise 13 |
 | `scripts/python/selfplay_softmax.ipynb` | Variant training script: softmax move selection (τ=0.05, top-10 candidates), style modifier presets (neutral/attacking/cautious/reckless/positional). |
 | `scripts/python/selfplay_sf.ipynb` | Stockfish-teacher variant (not continued since run_id=16): plays against Stockfish at configurable ELO, TD(0) updates, built-in ELO estimation. Windows asyncio fix included. Retained for reference. |
 | `scripts/python/selfplay_mc.ipynb` | Archived Monte Carlo version of the self-play loop. Superseded by TD(0). Retained for reference. |

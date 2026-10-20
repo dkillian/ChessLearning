@@ -207,3 +207,111 @@ forward(x, legal_moves) -> (policy_probs, value)
 ### Status at session end
 - Plan documented; `engine_nn_v2.py` written by RStudio Assistant — all 13 unit tests passing
 - Four MCTS notebooks (`selfplay_mcts_v1` through `v4`) not yet created
+
+---
+
+## Session 23 — October 19, 2026 (RStudio Assistant)
+
+### Context
+Assessed MCTS v1 overnight run (run_id=30, 80 games). Two bugs fixed across all four MCTS notebooks. 80-game v2 tranche started.
+
+### MCTS v1 Assessment (run_id=30)
+
+**Draw collapse confirmed:** 80/81 games drawn (98.8%). Only 10/19 correct feature signs at game 80 — barely above chance. Root cause is the same draw-equilibrium problem from the MC era: near-uniform value net → MCTS exploits repetitions → all-draw replay buffer → near-zero gradients.
+
+### Bug Fixes Applied to All Four MCTS Notebooks
+
+**td_error NULL logging (v1 and v2):**
+```python
+# Before (v1 after earlier fix; v2 before fix):
+def log_game(game_number, board, n_halfmoves, duration_s, loss=None):
+    cur.execute("INSERT INTO game_records (run_id, game_number, pgn) VALUES (?, ?, ?)", ...)
+
+# After:
+def log_game(game_number, board, n_halfmoves, duration_s,
+             terminated_by="natural", resigned_turn=None, loss=None):
+    cur.execute(
+        "INSERT INTO game_records (run_id, game_number, pgn, td_error) VALUES (?, ?, ?, ?)",
+        (RUN_ID, game_number, board_to_pgn_str(board, game_number),
+         round(float(loss), 6) if loss is not None else None)
+    )
+```
+
+**Resignation added to all four MCTS notebooks:**
+
+Config cell (all four):
+```python
+RESIGN_THRESHOLD   = 0.9        # resign when value < -this
+RESIGN_CONSECUTIVE = 4          # consecutive half-moves below threshold
+```
+
+play_game — resignation check before appending to training examples:
+```python
+# v1/v2 (ValueNet — returns scalar):
+with torch.no_grad():
+    lv = net(feat.unsqueeze(0)).item()
+
+# v3/v4 (DualNet/ResNet — returns value + policy tuple):
+with torch.no_grad():
+    val_out, _ = net(tensor.unsqueeze(0))
+    lv = val_out.item()
+
+if lv < -resign_threshold:
+    consecutive_bad += 1
+    if consecutive_bad >= resign_consecutive:
+        terminated_by = "resignation"
+        resigned_turn = board.turn
+        break
+else:
+    consecutive_bad = 0
+```
+
+Outcome determination in play_game (all four):
+```python
+if terminated_by == "resignation":
+    white_val = -1.0 if resigned_turn == chess.WHITE else 1.0
+else:
+    result    = board.result(claim_draw=True)
+    white_val = {"1-0": 1.0, "0-1": -1.0}.get(result, 0.0)
+```
+
+log_game — outcome string from resigned_turn on resignation (v1/v2 shown; v3/v4 keep policy_loss param):
+```python
+def log_game(game_number, board, n_halfmoves, duration_s,
+             terminated_by="natural", resigned_turn=None, loss=None):
+    if terminated_by == "resignation":
+        outcome_str = "0-1" if resigned_turn == chess.WHITE else "1-0"
+    else:
+        result      = board.result(claim_draw=True)
+        outcome_str = {"1-0": "1-0", "0-1": "0-1"}.get(result, "1/2-1/2")
+    cur.execute(
+        "INSERT INTO games (..., terminated_by) VALUES (?, ?, ?, ?, ?, ?)",
+        (..., terminated_by)   # was hardcoded "natural"
+    )
+```
+
+Training loop (all four):
+```python
+# Before:
+examples, board, n_halfmoves = play_game(net)
+outcome_str = log_game(game_number, board, n_halfmoves, duration)
+
+# After:
+examples, board, n_halfmoves, terminated_by, resigned_turn = play_game(net)
+outcome_str = log_game(game_number, board, n_halfmoves, duration,
+                       terminated_by=terminated_by, resigned_turn=resigned_turn, loss=loss)
+```
+
+### lc0 Installation
+- lc0 v0.32.1 (NVIDIA GPU, CUDA 12) installed to `C:\lc0\`
+- Bundled weights: `791556.pb.gz` (strong network)
+- Maia weights (human-like, ELO-targeted): `https://github.com/CSSLab/maia-chess/releases/download/v1.0/maia-1100.pb.gz` etc.
+- python-chess connection: `SimpleEngine.popen_uci(["C:/lc0/lc0.exe", "--weights=C:/lc0/791556.pb.gz"])`
+- Maia NOT recommended as training teacher: `nodes=1` makes it a move-predictor, not a win-seeking opponent
+
+### Key Reference: McGrath et al. PNAS 2022
+"Acquisition of Chess Knowledge in AlphaZero" — directly studies concept acquisition sequence in AlphaZero-style training; the central scientific reference for this project's research question.
+
+### Status at Session End
+- run_id=31 (MCTS v2, ValueNet(768)) tranche in progress; ~game 74 at 8 AM; resume with RESUME=True
+- All four MCTS notebooks patched (resignation + td_error)

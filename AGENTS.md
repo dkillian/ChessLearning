@@ -80,12 +80,14 @@ To start a session:
 
 - **Python**: `python-chess` for rules; custom engine for feature extraction, minimax search, TD learning
 - **R**: `tidyverse`, `DBI`, `RSQLite` for visualization and analysis
+- **Stockfish 19**: installed; **lc0 v0.32.1** (NVIDIA GPU/CUDA 12) installed to `C:\lc0\`; bundled network `791556.pb.gz`; Maia weights available at github.com/CSSLab/maia-chess (NOT recommended as training teacher — nodes=1 design)
+- **Key reference**: McGrath et al. PNAS 2022 — "Acquisition of Chess Knowledge in AlphaZero" — central scientific reference for concept acquisition sequence research
 - **Storage**: SQLite database at `data/chess_learning.db` — 10 tables (runs, games, game_records, weights, weight_deltas, feature_stats, position_logs, baseline_evals, stockfish_evals, stockfish_games); `stockfish_games` created by `05_stockfish_benchmark.R`, not by `setup_database()`. **Session 21:** `games` and `stockfish_games` gained `seed_run_id INTEGER` and `seed_game_number INTEGER` columns to track which checkpoint each game was played against.
 - **Stockfish 19**: installed via winget; used for ELO benchmarking and live game play; minimum `UCI_Elo` = 1320
 
 ---
 
-## Current Architecture (as of Session 22)
+## Current Architecture (as of Session 23)
 
 ### Engine (`scripts/python/engine.py`) — v2
 - **14 learnable positional features** (material features removed entirely)
@@ -141,7 +143,11 @@ Applied to: `king_safety` (× phase), `mobility` (× (0.5+0.5×phase)), `pawn_ad
 | 27 | 640 | 3 | **SF teacher** (`selfplay_sf_nn.ipynb`); TD(0)+Adam; fresh start | ELO ~1105 at games 110 & 390 (above run 24 peak); slipped to 1079 at game 440; material_queen +0.442; signs volatile 11–18/19 (peaked game 340) |
 | 28 | 10 | 3 | **Self-play v2** (`selfplay_nn_v2.ipynb`); AdamW + LR schedule + resignation | 11/19 signs; 50% draw rate (expected, fresh model); no resignations |
 | 29 | 10 | 3 | **SF teacher v2** (`selfplay_sf_nn_v2.ipynb`); AdamW + LR schedule + temperature + resignation | 12/19 signs at game 10 (vs run 27's 17/19); weaker start attributed to near-uniform temperature on fresh model |
-| 30 | 1+ | — | **MCTS v1** (`selfplay_mcts_v1.ipynb`); ValueNet(19); game-outcome replay buffer; N_SIMULATIONS=200 | Smoke test: draw, 602 halfmoves, 5.5 min/game; all features near zero (fresh model); overnight run N_GAMES=80 started midnight Oct 19 |
+| 30 | 81 | — | **MCTS v1** (`selfplay_mcts_v1.ipynb`); ValueNet(19); game-outcome replay buffer; N_SIMULATIONS=200 | 98.8% draws; 10/19 correct signs; weights random-walk; draw collapse confirmed |
+| 31 | 80 | — | **MCTS v2** (`selfplay_mcts_v2.ipynb`); ValueNet(768); bitboard input | 100% draws; weights monotone → 0 (trivial solution); draw collapse architecture-independent |
+| 32 | 80 | — | **MCTS v3** (`selfplay_mcts_v3.ipynb`); DualNet(768); policy + value heads | 100% draws; policy loss ~3.0 (near-uniform); weights decline then slightly stabilize |
+| 33 | 80 | — | **MCTS v4** (`selfplay_mcts_v4.ipynb`); ResNet(768, 5 blocks, 128 filters) | 100% draws; 1.9 min/game (fastest); draw collapse confirmed across all 4 stages |
+| 34 | 520+ | — | **MCTS v4 SF teacher** (`selfplay_sf_mcts_v4.ipynb`); ResNet + MCTS vs SF1320; engine positions only; VALUE_LOSS_WEIGHT=2.0 (added game 521) | 0W/31D/489L at game 520; policy loss → 0.04 by game 200; draw rate non-monotonic (peak ~15% at game 75–100, trough 2–4%); overnight run (800 games) in progress |
 
 ### engine_nn_v2.py — Stage 2–5 Engine (Session 21)
 
@@ -240,10 +246,12 @@ benchmark will use no move limit — chess rules only via claim_draw=True).
 | `scripts/python/selfplay_nn_v2.ipynb` | **New (Session 21)** — self-play + AdamW (weight_decay=1e-4) + MultiStepLR + resignation; run_id=28 |
 | `scripts/python/selfplay_sf_nn.ipynb` | **New (Session 21)** — SF teacher (Adam); chess-rules-only termination; run_id=27 |
 | `scripts/python/selfplay_sf_nn_v2.ipynb` | **New (Session 21)** — SF teacher + AdamW + MultiStepLR + temperature move selection + resignation; run_id=29 |
-| `scripts/python/selfplay_mcts_v1.ipynb` | **New (Session 22)** — Stage 2: MCTS + ValueNet(input_dim=19); game-outcome replay buffer; AdamW + MultiStepLR; N_SIMULATIONS=200; run_id=30 |
-| `scripts/python/selfplay_mcts_v2.ipynb` | **New (Session 22)** — Stage 3: MCTS + ValueNet(input_dim=768); bitboard input; 12 plane-aggregated attribution; run_id=31 |
-| `scripts/python/selfplay_mcts_v3.ipynb` | **New (Session 22)** — Stage 4: MCTS + DualNet(768); dual loss MSE+CE; policy targets = normalized visit counts; `policy_loss` in `game_records`; run_id=32 |
-| `scripts/python/selfplay_mcts_v4.ipynb` | **New (Session 22)** — Stage 5: MCTS + ResNet(768, 5 blocks, 128 filters); AlphaZero architecture; same dual loss as Stage 4; run_id=33 |
+| `scripts/python/selfplay_mcts_v1.ipynb` | Stage 2: MCTS + ValueNet(input_dim=19); game-outcome replay buffer; AdamW + MultiStepLR; N_SIMULATIONS=200; run_id=30. **Session 23:** resignation added (threshold=0.9, consecutive=4); td_error logging fixed |
+| `scripts/python/selfplay_mcts_v2.ipynb` | Stage 3: MCTS + ValueNet(input_dim=768); bitboard input; 12 plane-aggregated attribution; run_id=31. **Session 23:** resignation + td_error fix |
+| `scripts/python/selfplay_mcts_v3.ipynb` | Stage 4: MCTS + DualNet(768); dual loss MSE+CE; policy targets = normalized visit counts; run_id=32. **Session 23:** resignation added; fixed `_, val_out = net(...)` unpacking (DualNet returns policy first) |
+| `scripts/python/selfplay_mcts_v4.ipynb` | Stage 5: MCTS + ResNet(768, 5 blocks, 128 filters); AlphaZero architecture; same dual loss; run_id=33. **Session 23:** resignation added; same unpacking fix as v3 |
+| `scripts/python/selfplay_sf_mcts_v4.ipynb` | **New (Session 23)** — MCTS v4 + Stockfish teacher; ResNet + MCTS vs SF1320; engine positions only in replay buffer; VALUE_LOSS_WEIGHT=2.0; run_id=34 |
+| `scripts/python/make_sf_mcts_v4.py` | **New (Session 23)** — Generation script for selfplay_sf_mcts_v4.ipynb |
 | `scripts/python/engine_nn_v2.py` | **New (Session 21)** — Stage 2–5 engine: `board_to_tensor` (768-dim bitboard), `MCTSNode`, `mcts_search`, `ValueNet` (Stages 2–3), `DualNet` (Stage 4), `ResNet` (Stage 5); all 13 tests passing |
 | `scripts/python/update_v2_notebooks.py` | Utility: patches v2 notebooks with AlphaZero improvements |
 | `scripts/python/selfplay_td0.ipynb` | TD(0) self-play training; epsilon-greedy; v2 engine; current runs: 18 |
@@ -259,12 +267,14 @@ benchmark will use no move limit — chess rules only via claim_draw=True).
 | File | Purpose |
 |------|---------|
 | `scripts/r/query self play notebook.R` | Parameterized assessment tool — set `RUN_ID`, `GAME_START`, `GAME_END`; shows engine perspective (Win/Loss/Draw) for SF-teacher runs |
-| `scripts/r/03_visualize.qmd` | Full cross-run visualization |
+| `scripts/r/03_visualize.qmd` | Full cross-run visualization. **Session 23:** default `show_runs` updated to include runs 30 and 31 |
 | `scripts/r/04_game_viewer.R` | Shiny app — game viewer with run selector |
 | `scripts/r/td_tutorial.qmd` | Tutorial: TD(0) learning via Scholar's Mate walkthrough |
 | `scripts/r/negamax_tutorial.qmd` | Tutorial: negamax search with alpha-beta pruning; worked example using live weights |
 | `scripts/r/05_move_scorer.R` | Parameterized script — score all legal moves from any FEN at configurable depth/run |
-| `scripts/r/05_stockfish_benchmark.R` | Parameterized script — run ELO benchmark vs Stockfish; designed to run as a background job. Config includes `ENGINE_MODULE` parameter (`"engine"` for runs 1–19, `"engine_learnable_material"` for run 20+, `"engine_nn"` for runs 24–26, `"engine_nn_v2"` for Stage 2–5 runs). **Session 17:** 80 half-move limit removed. **Session 21:** logs `seed_run_id`/`seed_game_number`; tries `nn_sf_run_*` checkpoint naming before `nn_run_*` |
+| `scripts/r/05_stockfish_benchmark.R` | Parameterized script — run ELO benchmark vs Stockfish; designed to run as a background job. Config includes `ENGINE_MODULE` parameter (`"engine"` for runs 1–19, `"engine_learnable_material"` for run 20+, `"engine_nn"` for runs 24–26, `"engine_nn_v2"` for Stage 2–5 runs). **Session 17:** 80 half-move limit removed. **Session 21:** logs `seed_run_id`/`seed_game_number`; tries `nn_sf_run_*` checkpoint naming before `nn_run_*`. **Session 23:** added `engine_nn_v2` branch with `N_SIMULATIONS` config; searches `mcts_v*_run_*.pt` and `mcts_sf_v*_run_*.pt` naming |
+| `scripts/r/ch08_blackjack.R` | **New (Session 23)** — R code from Rodriguez & Mendes (2018) Ch. 8; dealer hand simulations for Tables 8.1, 8.2, 8.4 |
+| `scripts/r/ch08_blackjack.qmd` | **New (Session 23)** — Quarto version of ch08_blackjack.R with explanatory prose, comparison table, and Exercise 13 |
 | `scripts/r/seed_supabase.R` | **New (Session 18)** — one-time seeding script: creates `nn_models` table in Supabase; seeds run_id=2 (learnable material from local run_id=21) and run_id=3 (NN from local run_id=24); safe to re-run |
 | `scripts/r/05_search_explorer.R` | Shiny app — interactive move scorer; navigate positions, compare move rankings by depth |
 | `scripts/r/06_search_mechanics.R` | Step-by-step walkthrough: board evaluation feature-by-feature, negamax depth-by-depth |
