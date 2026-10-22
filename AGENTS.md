@@ -87,7 +87,7 @@ To start a session:
 
 ---
 
-## Current Architecture (as of Session 24)
+## Current Architecture (as of Session 25)
 
 ### Engine (`scripts/python/Temporal Difference/engine.py`) — v2
 - **14 learnable positional features** (material features removed entirely)
@@ -150,7 +150,7 @@ Applied to: `king_safety` (× phase), `mobility` (× (0.5+0.5×phase)), `pawn_ad
 | 34 | 1323 | — | **MCTS v4 SF teacher** (`stockfish_mcts_v4.ipynb`); ResNet + MCTS vs SF1320; VALUE_LOSS_WEIGHT=2.0 (game 521+) | 0W/63D/1260L (4.8% draw rate); attribution peak ~0.9 games 80–100, collapsed by game 800; LR reset bug at game 521 |
 | 35 | — | — | **Self-play v2** (`selfplay_mcts_v4.ipynb`); Dirichlet noise (α=0.3, ε=0.25); LR resume fix; TEMP_THRESHOLD=9999 | Not yet run |
 | 36 | 100 | — | **SF teacher v2** (`stockfish_mcts_v4.ipynb`); same fixes as run 35 but with TEMP_THRESHOLD=30 | 0W/0D/100L; attribution near-zero throughout — temperature annealing identified as culprit |
-| 37 | — | — | **SF teacher v3** (`stockfish_mcts_v4.ipynb`); Dirichlet noise + LR fix + TEMP_THRESHOLD=9999 (annealing disabled) | Pending |
+| 37 | 100 | — | **SF teacher v3** (`stockfish_mcts_v4.ipynb`); Dirichlet noise + LR fix + TEMP_THRESHOLD=9999 (annealing disabled) | 0W/1D/99L; small non-zero attributions (max 0.101 game 10, ~0.001 game 100); no surge yet — extend to 300 games |
 
 ### engine_nn_v2.py — Stage 2–5 Engine (Session 21)
 

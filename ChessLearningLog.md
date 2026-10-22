@@ -2,6 +2,61 @@
 
 ---
 
+## Session 25 — October 22, 2026
+
+### Run 37 Assessment (100-game tranche)
+- **Outcomes**: 0W / 1D / 99L — one draw, 1% draw rate
+- **Attribution weights**: non-zero but very small throughout (max 0.101 at game 10, ~0.001 at game 100); noisy, no clear upward trend
+- **Comparison to runs 34 and 36**:
+  - Run 34 (no Dirichlet, no fix): attribution rose to 0.9 by game 100 → eventually collapsed
+  - Run 36 (Dirichlet + temp annealing): flat near-zero throughout → identified as culprit
+  - Run 37 (Dirichlet, no annealing): small non-zero values throughout — partial improvement, surge not yet visible
+- **Current hypothesis**: Dirichlet noise is slowing early convergence (more diverse gradient directions); VALUE_LOSS_WEIGHT=2.0 from game 1 (vs. run 34 which didn't add it until game 521) may also be a factor. Run 37 may need 200–300 games to see a surge analogous to run 34's game 70–80 peak.
+
+### AlphaZero Scale Discussion
+AlphaZero trained chess in 9 hours using 5,000 TPUs and 44 million self-play games. Our single-machine sequential setup (~30s/game for SF teacher) can produce ~200–300 games per overnight session. The scale gap is fundamental. Key implication: the TD approach (which updates on every position without a replay buffer) produces far more gradient steps per game than MCTS replay-buffer training.
+
+### Project Reframing
+- **Primary scientific contribution**: TD linear engine with explicit feature weights — directly addresses the McGrath et al. (PNAS 2022) concept acquisition sequence question, more interpretably than AlphaZero's black-box probes
+- **Realistic ELO ceiling**: depth 3 (~1400); depth 5 (~1700); depth 6-7 (~1800-2000)
+- **MCTS runs**: valuable as a secondary comparison condition but not the primary vehicle
+- **Return to TD focus** confirmed by user; TD learning also better for RL pedagogy (TD error, credit assignment, bootstrapping all directly visible)
+
+### `td_tutorial v2.qmd` — Major Improvements
+
+**New visualizations:**
+- `render_ply()` function: side-by-side chess board SVG (via `chess.svg.board()`) + diverging bar chart (feature values, weights, and contributions at each ply); blue = positive, red = negative; `svglite::stringSVG()` for inline SVG; `htmltools` flexbox layout
+- Per-move panels added at every ply (7 panels total) showing board + chart together
+- Score trajectory plot: white's advantage throughout the game (all scores converted to white's perspective; points colored by side to move)
+
+**Monte Carlo section added:**
+- Parallel walkthrough of the same game using MC learning (update all positions from game outcome after game ends)
+- Zero weight initialization shown to work cleanly with MC (vs. failing with TD(0))
+- Move-by-move render_ply panels showing MC updates
+- TD vs MC weight trajectory comparison plot at end
+
+**Bug fixes and content corrections:**
+- Engine import path updated: `../python` → `../python/Temporal Difference` (after folder reorganization)
+- `chess.svg.svg()` → `chess.svg.board()` (correct python-chess API)
+- Feature description vector: updated from 17 entries (old engine) to 14 entries (current engine.py v2)
+- Row selection updated: `.[c(10,9,1),]` → `.[c(6,5,12),]` (center_control, king_safety, piece_development)
+- `king_safety` description: corrected from old "safe squares adjacent to king" to current Stockfish-style "pawn shelter minus attacker count, normalized and phase-scaled"
+- `render_ply()`: updated to accept explicit `feats_df` and `wts_df` arguments (default to globals; MC section passes `wts_mc`)
+- `fmt_feats()`: updated to only apply column widths for columns present in the table; added footer note for range column
+
+**Feature range analysis:**
+- Queried feature_stats DB for empirical per-game mean ranges across all training runs
+- Added `range` column to feats tibble (e.g., mobility: [-19, +20], king_safety: [-5, +5], knight_pst: [-0.4, +0.4])
+- Added footer note: "Ranges are per-game averages from training runs; per-position values can be wider"
+
+### Steps for Next Session
+1. **Render td_tutorial v2.qmd** — confirm all chunks run end-to-end; debug any remaining issues
+2. **Run 37 extension** — run 200 more games; check if attribution surge appears (expected around game 100–200 based on run 34 pattern)
+3. **TD depth experiment** — start a new self-play TD run at depth 4 or 5; benchmark ELO gain from search depth alone
+4. **Consider run 35 (self-play MCTS)** — parallel comparison once run 37 validates the fix
+
+---
+
 ## Session 24 — October 20, 2026
 
 ### Run 34 Assessment (Overnight Results)
