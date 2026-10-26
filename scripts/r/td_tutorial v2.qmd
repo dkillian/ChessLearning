@@ -31,7 +31,10 @@ theme_set(base_quarto)
 
 no_lead <- function(x, digits = 2) sub("^(-?)0\\.", "\\1.", as.character(round(x, digits)))
 
-fmt_feats <- function(x, col_widths = list(description = 2, scoring = 1.3, range = 0.8)) {
+fmt_feats <- function(x, col_widths = list(description = 2.5, 
+                                           feature = .6, 
+                                           scoring = 1, 
+                                           range = 0.8)) {
   if (!inherits(x, "flextable")) x <- flextable(x)
   present <- names(x$body$dataset)
   for (col in intersect(names(col_widths), present)) {
@@ -169,13 +172,28 @@ Let's start an object to collect the feature values at each half-move
 ('ply')
 
 ```{r}
-feats <- tibble(feature=names(engine$default_weights("zero")),
+set.seed(3453)
+feats <- tibble(feature_name=names(engine$default_weights("zero")),
+                feature=c("Passed pawn",
+                          "Doubled pawn",
+                          "Isolated pawn",
+                          "Backward pawn",
+                          "King safety",
+                          "Center control",
+                          "Rook open file",
+                          "Connected rooks",
+                          "Knight outpost",
+                          "Bishop pair",
+                          "Rook seventh rank",
+                          "Piece development",
+                          "Mobility",
+                          "Pawn advancement"),
                 description = c(
                     "Pawns with no opposing pawns ahead on same/adjacent file",
                     "Extra pawns beyond one on any file (penalty)",
                     "Pawns with no friendly pawns on adjacent files (penalty)",
                     "Pawns that cannot advance safely — sentry pawn ahead (penalty)",
-                    "Pawn shelter (friendly pawns 1-2 ranks ahead) minus opponent pieces attacking king zone; normalized and phase-scaled",
+                    "Friendly pawns 1-2 ranks ahead of king, minus pieces attacking king zone",
                     "Central squares (d4, d5, e4, e5) attacked or occupied",
                     "Rooks on files with no pawns of either color",
                     "Both rooks share a rank/file with no pieces between",
@@ -185,6 +203,22 @@ feats <- tibble(feature=names(engine$default_weights("zero")),
                     "Minor pieces off their starting squares",
                     "Squares attacked by all non-king pieces (normalized)",
                     "Total rank advancement of all pawns from starting rank (normalized)"),
+                divisor = c(
+                    "none",
+                    "none",
+                    "none",
+                    "none",
+                    "/3",
+                    "/4",
+                    "none",
+                    "none",
+                    "/2",
+                    "none",
+                    "none",
+                    "none",
+                    "/30",
+                    "/20"
+                ),
                 scoring = c(
                     rep("Our count minus theirs", 4),
                     rep("Our count minus theirs", 4),
@@ -193,74 +227,74 @@ feats <- tibble(feature=names(engine$default_weights("zero")),
                     rep("Our count minus theirs", 2),
                     rep("Our count minus theirs (normalized)", 2)),
                 range = c(
-                    "[-5, +5]",   # passed_pawn
-                    "[-2, +2]",   # doubled_pawn
-                    "[-4, +5]",   # isolated_pawn
-                    "[-2, +2]",   # backward_pawn
-                    "[-5, +5]",   # king_safety
-                    "[-3, +3]",   # center_control
-                    "[-2, +2]",   # rook_open_file
-                    "[-1, +1]",   # connected_rooks
+                    "[-5, +5]",     # passed_pawn
+                    "[-2, +2]",     # doubled_pawn
+                    "[-4, +5]",     # isolated_pawn
+                    "[-2, +2]",     # backward_pawn
+                    "[-5, +5]",     # king_safety
+                    "[-3, +3]",     # center_control
+                    "[-2, +2]",     # rook_open_file
+                    "[-1, +1]",     # connected_rooks
                     "[-0.4, +0.4]", # knight_pst
-                    "[-1, +1]",   # bishop_pair
-                    "[-1, +1]",   # rook_seventh
-                    "[-3, +3]",   # piece_development
-                    "[-19, +20]", # mobility
-                    "[-9, +15]"   # pawn_advancement
-                ),
-                start=0)
+                    "[-1, +1]",     # bishop_pair
+                    "[-1, +1]",     # rook_seventh
+                    "[-3, +3]",     # piece_development
+                    "[-19, +20]",   # mobility
+                    "[-9, +15]"     # pawn_advancement
+                ))
+
 
 feats %>%
     fmt_feats()
 ```
 
-For Scholar's Mate, the most meaningful features the engine can learn
-from are center control, king safety, and piece development. Our
-features table will be trimmed to just these three.
+The starting weight values are just randomly seeded to jumpstart the learning process. 
+
+For Scholar's Mate, the most meaningful features the engine can learn from are center control, king safety, and piece development. Our features table will be trimmed to just these three.
 
 ```{r}
-feats <- feats %>%
-    .[c(6,5,12),] %>%
-    mutate(label=c("Center control","King safety","Piece development")) %>%
-    select(6, 2:5)
+set.seed(432)
+featsSch <- feats %>%
+    .[c(6,5,12),] 
 
-feats %>%
-    fmt_feats
+featsSch %>%
+    fmt_feats()
 ```
 
-We'll start by creating an object to randomly seed starting weights, then collect the weight updates after each half-move (ply)
+We'll start by creating an object to store the feature values and weights for each half-move (ply). 
 
 ```{r}
-set.seed(43)
-wts <- tibble(feature = feats$feature,
-              start = abs(round(rnorm(3, 0, .01), 4))) 
-# random start to jumpstart learning
-# constrained to be positive, because we know that all features are constructed to be positive
-wts %>%
+set.seed(32)
+sch <- featsSch %>%
+    mutate(f0=0,
+           w0 = abs(round(rnorm(3, 0, .01), 4)), 
+# random starting weight to jumpstart learning
+# constrained to be positive, because we know that all features are constructed to be positive)
+           s0=f0*w0) %>%
+sele3ct(feature_name, feature, f0, w0, s0)
+
+sch %>%
     flextable()
 ```
 
-Create an object to collect the score at each ply. 
-
-The evaluation score is the sum of weights times the feature values
+The overall evaluation score is the sum of all scores for each feature evalation
 
 ```{r}
 # State before ply 1 (starting position)
-score_t <- sum(feats$start * wts$start)
+score_t <- sum(sch$s0)
 score_t
 ```
 
 We've set the initial feature values, the initial weights, and the
-initial score.
+initial score. Note that all feature values, weights, and scores are from the point of view of the player to move. So time zero is the start of the game before any moves. All values, weights, and scores at an even numbered ply are from the point of view of white. All values, weights, and scores at odd-numbered plys are from the point of view of black. 
 
-Then we set up a board.
+Now we set up a board.
 
 ```{r}
 # Fresh board
 b   <- chess_m$Board()
 b
 ```
-
 We will now make a move and do the following: (1) update the feature
 values, (2) calculate the evaluation score based on the updated feature
 values and the weights from the previous move, and (3) update the
@@ -280,9 +314,9 @@ Play first ply and update the feature values
 # Push 1.e4 and evaluate next state
 b$push(chess_m$Move$from_uci("e2e4"))
 
-feats$t1 <- as.numeric(reticulate::py_to_r(engine$extract_features(b))[feats$feature])
+sch$f1 <- as.numeric(reticulate::py_to_r(engine$extract_features(b))[sch$feature_name])
 
-feats %>%
+sch %>%
     fmt_feats
 ```
 

@@ -2,6 +2,27 @@
 
 ---
 
+## Session 26 — October 26, 2026
+
+### Topic: `center_control` Feature Mechanics (td_tutorial v2.qmd)
+
+Brief conceptual session tracing how the `center_control` feature is computed and normalized.
+
+**Key points discussed:**
+- After 1. e4 (Black to move): White scores 2 center-control points (e4 pawn attacks d5 + occupies e4); Black scores 0 → feature = (0 − 2) / 4 = **−0.5**
+- The `/4` divisor is not strictly necessary — the learned weight absorbs the scaling — but removing it would multiply center_control's effective TD learning rate by 4, which could cause instability given it's already a high-gradient feature
+- Five of the 14 features have explicit divisors: `king_safety` (/3), `center_control` (/4), `knight_pst` (/2), `mobility` (/30), `pawn_advancement` (/20); the remaining 9 are raw differences (small integers)
+
+### No code changes this session
+
+### Steps for Next Session
+1. **Render td_tutorial v2.qmd** — confirm all chunks run end-to-end; debug any remaining issues
+2. **Run 37 extension** — run 200 more games; check if attribution surge appears (expected around game 100–200 based on run 34 pattern)
+3. **TD depth experiment** — start a new self-play TD run at depth 4 or 5; benchmark ELO gain from search depth alone
+4. **Consider run 35 (self-play MCTS)** — parallel comparison once run 37 validates the fix
+
+---
+
 ## Session 25 — October 22, 2026
 
 ### Run 37 Assessment (100-game tranche)
