@@ -1,7 +1,6 @@
 # Chess Learning
 
-A research project exploring how a chess engine learns through self-play — with a focus on
-documenting and visualizing the **progression of chess concept acquisition** over training time.
+A research project exploring how a chess engine learns through self-play — with a focus on documenting and visualizing the **progression of chess concept acquisition** over training time.
 
 ---
 
@@ -39,7 +38,11 @@ documenting and visualizing the **progression of chess concept acquisition** ove
 
 ## Scripts
 
-[Temporal difference learning - Tutorial](https://dkillian.github.io/ChessLearning/scripts/r/td_tutorial%20v2.html)
+[Temporal difference learning](https://dkillian.github.io/ChessLearning/scripts/r/td_tutorial%20v2.html)
+
+[How does the engine search?]()
+
+[How can we get the engine to avoid Scholar's Mate?]()
 
 ## Architecture
 
