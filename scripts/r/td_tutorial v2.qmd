@@ -62,7 +62,7 @@ render_ply <- function(board, feat_col, wt_col, feats_df = feats, wts_df = wts) 
   wts_vec <- as.numeric(wts_df[[wt_col]])
 
   chart_data <- tibble(
-    feature      = feats$feature,
+    feature      = feats_df$feature,
     value        = vals,
     weight       = wts_vec,
     contribution = vals * wts_vec
@@ -74,7 +74,7 @@ render_ply <- function(board, feat_col, wt_col, feats_df = feats, wts_df = wts) 
       metric  = factor(metric,
                        levels = c("value", "weight", "contribution"),
                        labels = c("Feature value", "Weight", "Contribution")),
-      feature = factor(feature, levels = rev(feats$feature))
+      feature = factor(feature, levels = rev(feats_df$feature))
     )
 
   p <- ggplot(chart_data, aes(x = val, y = feature, fill = val > 0)) +
@@ -267,11 +267,10 @@ We'll start by creating an object to store the feature values and weights for ea
 set.seed(32)
 sch <- featsSch %>%
     mutate(f0=0,
-           w0 = abs(round(rnorm(3, 0, .01), 4)), 
+           w0 = abs(round(rnorm(3, 0, .01), 4))) %>%
 # random starting weight to jumpstart learning
 # constrained to be positive, because we know that all features are constructed to be positive)
-           s0=f0*w0) %>%
-sele3ct(feature_name, feature, f0, w0, s0)
+select(feature_name, feature, f0, w0)
 
 sch %>%
     flextable()
@@ -281,23 +280,23 @@ The overall evaluation score is the sum of all scores for each feature evalation
 
 ```{r}
 # State before ply 1 (starting position)
-score_t <- sum(sch$s0)
+score_t <- sum(sch$f0 * sch$w0)
 score_t
 ```
 
-We've set the initial feature values, the initial weights, and the
-initial score. Note that all feature values, weights, and scores are from the point of view of the player to move. So time zero is the start of the game before any moves. All values, weights, and scores at an even numbered ply are from the point of view of white. All values, weights, and scores at odd-numbered plys are from the point of view of black. 
+We've set the initial feature values, the initial weights, and the initial score. Note that all feature values, weights, and scores are from the point of view of the player to move. So time zero is the start of the game before any moves. All values, weights, and scores at an even numbered ply are from the point of view of white. All values, weights, and scores at odd-numbered plys are from the point of view of black. 
 
-Now we set up a board.
+We will now set up a board, make a move, and do the following: 
 
-```{r}
-# Fresh board
-b   <- chess_m$Board()
-b
-```
-We will now make a move and do the following: (1) update the feature
-values, (2) calculate the evaluation score based on the updated feature
-values and the weights from the previous move, and (3) update the
+- Update the feature values
+- Calculate evaluation score
+
+
+(1) update the feature
+values, 
+(2) calculate the evaluation score based on the updated feature
+values and the weights from the previous move, and 
+(3) update the
 weights using the evaluation score, the error, the learning rate, and
 the weights from the previous move.
 
@@ -311,28 +310,34 @@ positive; red bars are negative.
 Play first ply and update the feature values
 
 ```{r}
+# Fresh board
+b   <- chess_m$Board()
+b
 # Push 1.e4 and evaluate next state
 b$push(chess_m$Move$from_uci("e2e4"))
+b
 
-sch$f1 <- as.numeric(reticulate::py_to_r(engine$extract_features(b))[sch$feature_name])
+sch <- sch %>%
+    mutate(f1 = as.numeric(
+        reticulate::py_to_r(
+            engine$extract_features(b))[sch$feature_name]))
 
 sch %>%
     fmt_feats
 ```
 
-White attacks the center! Negative 1 for black. No value in occupying
-the center.
+White both attacks and occupies the center! This is negative 1 for black on center control, which with the scaling comes to -.5. A pawn was removed from the King's shield, so white gets dinged on king safety. There is no change to piece development. 
 
-New score
+We score the position by summing the products of feature values and the previous move's weights
 
 ```{r}
-score_t1 <- sum(feats$t1 * wts$start)
+score_t1 <- sum(sch$f1 * sch$w0)
 score_t1
 ```
 
 The score `r score_t1` is from black's point of view. So after white
-plays e4, black has a slightly worse position. But really this is just
-noise after a single move.
+plays e4, black has a slightly better position due to white's weaker King. But really this is just
+noise after a single move with randomly seeded weights.
 
 Let's update the weights based on the new score and the new feature
 values.
@@ -341,26 +346,27 @@ values.
 lr    <- 0.1
 error <- score_t1 - score_t
 
-wts$w1 <- wts$start + lr * error * feats$t1
+sch <- sch %>%
+    mutate(w1 = round(sch$w0 + lr * error * sch$f1,4))
 
-wts %>%
-    flextable()
+sch %>%
+    fmt_feats()
 ```
 
-After e4, the weight on central control slightly increased.
+After e4, the weights on central control and piece development slightly increased.
 
 ```{r}
-htmltools::tagList(render_ply(b, "t1", "w1"))
+htmltools::tagList(render_ply(b, "f1", "w1", feats_df = sch, wts_df = sch))
 ```
 
-### 1. .. e5
+### 1. ... e5
 
 ```{r}
 b$push(chess_m$Move$from_uci("e7e5"))
 
-feats$t2 <- as.numeric(reticulate::py_to_r(engine$extract_features(b))[feats$feature])
+sch$f2 <- as.numeric(reticulate::py_to_r(engine$extract_features(b))[sch$feature_name])
 
-feats %>%
+sch %>%
     fmt_feats()
 ```
 
@@ -368,7 +374,7 @@ Now black is attacking a central square! This brings the feature value
 back to zero.
 
 ```{r}
-score_t2 <- sum(wts$w1 * feats$t2)
+score_t2 <- sum(sch$w1 * sch$f2)
 score_t2
 ```
 
@@ -377,17 +383,19 @@ the score reflects white's point of view.
 
 ```{r}
 error  <- score_t2 - score_t1
-wts$w2 <- wts$w1 + lr * error * feats$t2
 
-wts %>% 
-    flextable()
+sch <- sch %>%
+    mutate(w2 = w1 + lr * error * f2)
+
+sch %>% 
+    fmt_feats()
 ```
 
 The feature values were all zero, so the weights do not change for this
 update.
 
 ```{r}
-htmltools::tagList(render_ply(b, "t2", "w2"))
+htmltools::tagList(render_ply(b, "f2", "w2", feats_df = sch, wts_df = sch))
 ```
 
 ### 2. Bc4
@@ -395,16 +403,16 @@ htmltools::tagList(render_ply(b, "t2", "w2"))
 ```{r}
 b$push(chess_m$Move$from_uci("f1c4"))
 
-feats$t3 <- as.numeric(reticulate::py_to_r(engine$extract_features(b))[feats$feature])
+sch$f3 <- as.numeric(reticulate::py_to_r(engine$extract_features(b))[sch$feature_name])
 
-feats %>%
+sch %>%
     fmt_feats()
 ```
 
-f7 is attacked! This changes the feature evaluation for king safety.
+f7 is attacked! Black's feature evaluations of king safety and piece development take damage! 
 
 ```{r}
-score_t3 <- sum(wts$w2 * feats$t3)
+score_t3 <- sum(sch$w2 * sch$f3)
 score_t3
 ```
 
@@ -412,26 +420,28 @@ After Bc4, the engine thinks black is a little worse than it had been.
 
 ```{r}
 error  <- score_t3 - score_t2
-wts$w3 <- wts$w2 + lr * error * feats$t3
 
-wts %>% 
-    flextable()
+sch <- sch %>%
+    mutate(w3 = round(w2 + lr * error * f3, 4))
+
+sch %>% 
+    fmt_feats()
 ```
 
 The weight on king safety slightly increased.
 
 ```{r}
-htmltools::tagList(render_ply(b, "t3", "w3"))
+htmltools::tagList(render_ply(b, "f3", "w3", feats_df = sch, wts_df = sch))
 ```
 
-### 2. .. Nc6
+### 2. ... Nc6
 
 ```{r}
 b$push(chess_m$Move$from_uci("b8c6"))
 
-feats$t4 <- as.numeric(reticulate::py_to_r(engine$extract_features(b))[feats$feature])
+sch$f4 <- as.numeric(reticulate::py_to_r(engine$extract_features(b))[sch$feature_name])
 
-feats %>%
+sch %>%
     fmt_feats()
 ```
 
@@ -440,7 +450,7 @@ point of view, she is winning on king safety and losing on central
 control.
 
 ```{r}
-score_t4 <- sum(wts$w3 * feats$t4)
+score_t4 <- sum(sch$w3 * sch$f4)
 score_t4
 ```
 
@@ -448,10 +458,12 @@ The engine thinks white is slightly better.
 
 ```{r}
 error  <- score_t4 - score_t3
-wts$w4 <- wts$w3 + lr * error * feats$t4
 
-wts %>%
-    flextable()
+sch <- sch %>%
+    mutate(w4 = round(w3 + lr * error * f4, 4))
+
+sch %>%
+    fmt_feats()
 ```
 
 The weight for king safety got stronger, while the weight on center
@@ -462,7 +474,7 @@ with losing. The engine needs lots of games to learn that center control
 is correlated with winning.
 
 ```{r}
-htmltools::tagList(render_ply(b, "t4", "w4"))
+htmltools::tagList(render_ply(b, "f4", "w4", feats_df = sch, wts_df = sch))
 ```
 
 ### 3. Qh5
@@ -470,14 +482,14 @@ htmltools::tagList(render_ply(b, "t4", "w4"))
 ```{r}
 b$push(chess_m$Move$from_uci("d1h5"))
 
-feats$t5 <- as.numeric(reticulate::py_to_r(engine$extract_features(b))[feats$feature])
+sch$f5 <- as.numeric(reticulate::py_to_r(engine$extract_features(b))[sch$feature_name])
 
-feats %>%
+sch %>%
     fmt_feats()
 ```
 
 ```{r}
-score_t5 <- sum(wts$w4 * feats$t5)
+score_t5 <- sum(sch$w4 * sch$f5)
 score_t5
 ```
 
@@ -485,16 +497,18 @@ Black's position continues to worsen.
 
 ```{r}
 error  <- score_t5 - score_t4
-wts$w5 <- wts$w4 + lr * error * feats$t5
 
-wts %>% 
-    flextable()
+sch <- sch %>%
+    mutate(w5 = round(w4 + lr * error * f5, 4))
+
+sch %>% 
+    fmt_feats()
 ```
 
 The weight for king safety increases.
 
 ```{r}
-htmltools::tagList(render_ply(b, "t5", "w5"))
+htmltools::tagList(render_ply(b, "f5", "w5", feats_df = sch, wts_df = sch))
 ```
 
 ### 3. ... Nf6
@@ -502,16 +516,16 @@ htmltools::tagList(render_ply(b, "t5", "w5"))
 ```{r}
 b$push(chess_m$Move$from_uci("g8f6"))
 
-feats$t6 <- as.numeric(reticulate::py_to_r(engine$extract_features(b))[feats$feature])
+sch$f6 <- as.numeric(reticulate::py_to_r(engine$extract_features(b))[sch$feature_name])
 
-feats %>%
+sch %>%
     fmt_feats()
 ```
 
 The knight move attacks two more center squares.
 
 ```{r}
-score_t6 <- sum(wts$w5 * feats$t6)
+score_t6 <- sum(sch$w5 * sch$f6)
 score_t6
 ```
 
@@ -519,17 +533,19 @@ White's position continues to improve.
 
 ```{r}
 error  <- score_t6 - score_t5
-wts$w6 <- wts$w5 + lr * error * feats$t6
 
-wts %>% 
-    flextable()
+sch <- sch %>%
+    mutate(w6 = round(w5 + lr * error * f6, 4))
+
+sch %>% 
+    fmt_feats()
 ```
 
 Same trend — stronger negative weight for center control and stronger
 positive weight for king safety.
 
 ```{r}
-htmltools::tagList(render_ply(b, "t6", "w6"))
+htmltools::tagList(render_ply(b, "f6", "w6", feats_df = sch, wts_df = sch))
 ```
 
 ### 4. Qxf7# 
@@ -537,9 +553,9 @@ htmltools::tagList(render_ply(b, "t6", "w6"))
 ```{r}
 b$push(chess_m$Move$from_uci("h5f7"))
 
-feats$t7 <- as.numeric(reticulate::py_to_r(engine$extract_features(b))[feats$feature])
+sch$f7 <- as.numeric(reticulate::py_to_r(engine$extract_features(b))[sch$feature_name])
 
-feats %>%
+sch %>%
     fmt_feats()
 ```
 
@@ -547,7 +563,7 @@ From black's point of view, he's winning the center but did not see to
 his king safety.
 
 ```{r}
-score_t7 <- sum(wts$w6 * feats$t7)
+score_t7 <- sum(sch$w6 * sch$f7)
 score_t7
 ```
 
@@ -561,10 +577,12 @@ our errors from that benchmark.
 ```{r}
 target <- -1                          # black is to move and has lost
 error  <- target - score_t7
-wts$w7 <- wts$w6 + lr * error * feats$t7
 
-wts %>%
-    flextable()
+sch <- sch %>% 
+    mutate(w7 = round(w6 + lr * error * f7, 4))
+
+sch %>%
+    fmt_feats()
 ```
 
 Note what learning has taken place after this game. Black was winning
@@ -576,7 +594,7 @@ It's unclear whether a run of Scholar's Mate games would correct the
 engine's mistaken impression that center control is bad.
 
 ```{r}
-htmltools::tagList(render_ply(b, "t7", "w7"))
+htmltools::tagList(render_ply(b, "f7", "w7", feats_df = sch, wts_df = sch))
 ```
 
 ## Review 
@@ -604,7 +622,11 @@ traj <- tibble(
     white_adv = if_else(to_move == "White", raw_score, -raw_score),
     label     = factor(label, levels = label)
   )
+traj %>%
+    flextable()
+```
 
+```{r}
 ggplot(traj, aes(x = label, y = white_adv, group = 1)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "grey60",
              linewidth = 0.5) +
@@ -626,35 +648,32 @@ ggplot(traj, aes(x = label, y = white_adv, group = 1)) +
 ### Features
 
 ```{r}
-featsL <- feats %>%
-    pivot_longer(-(1:3),
-                 names_to="t",
-                 values_to="value") %>%
-    mutate(move=rep(0:7,3),
-           color=ifelse(move %%2 == 0, "white", "black"),
-           move=ifelse(t=="start", NA, move),
-           color=ifelse(t=="start", NA, color)) %>%
-    na.omit()
+featsL <- sch |>
+  select(feature, matches("^f[0-9]+$")) |>
+  pivot_longer(-feature, names_to = "t", values_to = "value") |>
+  mutate(move = as.integer(sub("^f", "", t)),
+         color = ifelse(move %% 2 == 0, "white", "black"))
 
-ggplot(featsL, aes(move, value, color=color)) +
-    geom_point(size = 2.4, alpha=.4) +
-    geom_line(linewidth=1, alpha=.6) +
-    scale_color_manual(values=c("#4A2C17", "#E8D5B7")) +
-    coord_cartesian(xlim=c(1,7)) +
-    scale_x_continuous(breaks=1:7) +
-    facet_wrap(~feature, ncol=1) +
-    faceted_quarto +
-    labs(title="Feature values by move")
+ggplot(featsL, aes(move, value, color = color)) +
+  geom_point(size = 2.4, alpha = .4) +
+  geom_line(linewidth = 1, alpha = .6) +
+  scale_color_manual(values = c("#4A2C17", "#E8D5B7")) +
+  coord_cartesian(xlim = c(1, 7)) +
+  scale_x_continuous(breaks = 1:7) +
+  facet_wrap(~feature, ncol = 1) +
+  faceted_quarto +
+  labs(title = "Feature values by move")
 ```
 
 ### Weights
 
 ```{r}
-wtsL <- wts %>%
-    pivot_longer(-1,
+wtsL <- sch %>%
+    select(feature, starts_with("w")) %>%
+    pivot_longer(-feature,
                  names_to="t",
                  values_to="value") %>%
-    mutate(move=rep(0:7,3))
+    mutate(move=rep(0:7, 3))
 
 ggplot(wtsL, aes(move, value, color=feature)) +
     geom_point(size = 1, alpha=.5) +
@@ -666,187 +685,63 @@ ggplot(wtsL, aes(move, value, color=feature)) +
     labs(title="Weights by move")
 ```
 
-## Monte Carlo Learning
+## Interactive walkthrough
 
-In TD(0), each position is updated toward the **next position's estimated
-value** — a bootstrap. In Monte Carlo learning, we instead wait for the
-game to end and update every position toward the **actual game outcome**.
+Step through the game with the buttons or slider. Each position shows the board alongside the feature values, weights, and contributions for that ply.
 
-The update rule is the same weighted-error form:
+```{r ply-viewer, include=TRUE}
+# Replay the game to build a board for each ply
+sans <- c("e4", "e5", "Bc4", "Nc6", "Qh5", "Nf6", "Qxf7#")
+ply_labels <- as.character(traj$label)
 
-$$w \leftarrow w + \alpha \cdot (G - V(s)) \cdot \phi(s)$$
+game_board <- chess_m$Board()
+ply_boards <- vector("list", length(sans) + 1)
+ply_boards[[1]] <- game_board$copy()
+for (i in seq_along(sans)) {
+  game_board$push_san(sans[[i]])
+  ply_boards[[i + 1]] <- game_board$copy()
+}
 
-where G ∈ {+1, −1} is the game result from the side-to-move's perspective,
-rather than the next state's value.
+ply_panels <- lapply(seq_along(ply_boards) - 1, function(k) {
+  htmltools::div(
+    class = "ply-panel",
+    style = if (k == 0) "display:block;" else "display:none;",
+    render_ply(ply_boards[[k + 1]], paste0("f", k), paste0("w", k),
+               feats_df = sch, wts_df = sch)
+  )
+})
 
-Two consequences for the toy example:
+label_js <- paste0("[", paste0('"', ply_labels, '"', collapse = ","), "]")
 
-- **Zero initialization works** — the target is always ±1, never another
-  zero, so every update is non-trivial from the start
-- **Every error is directly interpretable** — the error at each position is
-  simply *how wrong was my evaluation, given who actually won?*
-
-White wins Scholar's Mate, so white-to-move positions target **+1** and
-black-to-move positions target **−1**.
-
-```{r}
-# MC weights start at zero
-wts_mc <- tibble(feature = feats$feature, mc0 = c(0, 0, 0))
-wts_mc |> flextable()
+htmltools::tagList(
+  htmltools::div(
+    style = "display:flex; gap:12px; align-items:center; margin:12px 0;",
+    htmltools::tags$button(id = "ply-prev", type = "button", "Previous"),
+    htmltools::tags$button(id = "ply-next", type = "button", "Next"),
+    htmltools::tags$input(id = "ply-slider", type = "range", min = 0,
+                          max = length(ply_labels) - 1, step = 1, value = 0,
+                          style = "flex:1;"),
+    htmltools::tags$span(id = "ply-label", ply_labels[1])
+  ),
+  ply_panels,
+  htmltools::tags$script(htmltools::HTML(paste0(
+    "(function() {",
+    "  var panels = document.querySelectorAll('.ply-panel');",
+    "  var slider = document.getElementById('ply-slider');",
+    "  var label = document.getElementById('ply-label');",
+    "  var labels = ", label_js, ";",
+    "  function show(i) {",
+    "    i = Math.max(0, Math.min(panels.length - 1, i));",
+    "    panels.forEach(function(p, j) { p.style.display = (j === i) ? 'block' : 'none'; });",
+    "    slider.value = i;",
+    "    label.textContent = labels[i];",
+    "  }",
+    "  document.getElementById('ply-prev').addEventListener('click', function() { show(parseInt(slider.value) - 1); });",
+    "  document.getElementById('ply-next').addEventListener('click', function() { show(parseInt(slider.value) + 1); });",
+    "  slider.addEventListener('input', function() { show(parseInt(slider.value)); });",
+    "})();"
+  )))
+)
 ```
 
-```{r}
-b_mc <- chess_m$Board()   # fresh board for SVG rendering
-```
 
-### 1. e4 — black to move, target = −1
-
-```{r}
-b_mc$push(chess_m$Move$from_uci("e2e4"))
-
-target_1   <- -1
-v_1        <- sum(wts_mc$mc0 * feats$t1)
-err_1      <- target_1 - v_1
-wts_mc$mc1 <- wts_mc$mc0 + lr * err_1 * feats$t1
-wts_mc |> flextable()
-```
-
-With zero weights, V(s) = 0 and the error is exactly −1. White controls the
-center (center_control = −1 from black's perspective), so the engine learns
-to associate poor center control with losing — the center_control weight rises.
-
-```{r}
-htmltools::tagList(render_ply(b_mc, "t1", "mc1", wts_df = wts_mc))
-```
-
-### 1. .. e5 — white to move, target = +1
-
-```{r}
-b_mc$push(chess_m$Move$from_uci("e7e5"))
-
-target_2   <- +1
-v_2        <- sum(wts_mc$mc1 * feats$t2)
-err_2      <- target_2 - v_2
-wts_mc$mc2 <- wts_mc$mc1 + lr * err_2 * feats$t2
-wts_mc |> flextable()
-```
-
-```{r}
-htmltools::tagList(render_ply(b_mc, "t2", "mc2", wts_df = wts_mc))
-```
-
-### 2. Bc4 — black to move, target = −1
-
-```{r}
-b_mc$push(chess_m$Move$from_uci("f1c4"))
-
-target_3   <- -1
-v_3        <- sum(wts_mc$mc2 * feats$t3)
-err_3      <- target_3 - v_3
-wts_mc$mc3 <- wts_mc$mc2 + lr * err_3 * feats$t3
-wts_mc |> flextable()
-```
-
-The f7 square is now attacked — king_safety deteriorates for black. The engine
-begins associating poor king safety with losing.
-
-```{r}
-htmltools::tagList(render_ply(b_mc, "t3", "mc3", wts_df = wts_mc))
-```
-
-### 2. .. Nc6 — white to move, target = +1
-
-```{r}
-b_mc$push(chess_m$Move$from_uci("b8c6"))
-
-target_4   <- +1
-v_4        <- sum(wts_mc$mc3 * feats$t4)
-err_4      <- target_4 - v_4
-wts_mc$mc4 <- wts_mc$mc3 + lr * err_4 * feats$t4
-wts_mc |> flextable()
-```
-
-```{r}
-htmltools::tagList(render_ply(b_mc, "t4", "mc4", wts_df = wts_mc))
-```
-
-### 3. Qh5 — black to move, target = −1
-
-```{r}
-b_mc$push(chess_m$Move$from_uci("d1h5"))
-
-target_5   <- -1
-v_5        <- sum(wts_mc$mc4 * feats$t5)
-err_5      <- target_5 - v_5
-wts_mc$mc5 <- wts_mc$mc4 + lr * err_5 * feats$t5
-wts_mc |> flextable()
-```
-
-```{r}
-htmltools::tagList(render_ply(b_mc, "t5", "mc5", wts_df = wts_mc))
-```
-
-### 3. ... Nf6 — white to move, target = +1
-
-```{r}
-b_mc$push(chess_m$Move$from_uci("g8f6"))
-
-target_6   <- +1
-v_6        <- sum(wts_mc$mc5 * feats$t6)
-err_6      <- target_6 - v_6
-wts_mc$mc6 <- wts_mc$mc5 + lr * err_6 * feats$t6
-wts_mc |> flextable()
-```
-
-```{r}
-htmltools::tagList(render_ply(b_mc, "t6", "mc6", wts_df = wts_mc))
-```
-
-### 4. Qxf7# — black to move, target = −1
-
-```{r}
-b_mc$push(chess_m$Move$from_uci("h5f7"))
-
-target_7   <- -1
-v_7        <- sum(wts_mc$mc6 * feats$t7)
-err_7      <- target_7 - v_7
-wts_mc$mc7 <- wts_mc$mc6 + lr * err_7 * feats$t7
-wts_mc |> flextable()
-```
-
-```{r}
-htmltools::tagList(render_ply(b_mc, "t7", "mc7", wts_df = wts_mc))
-```
-
-### TD vs Monte Carlo: weight trajectories compared
-
-```{r fig.height=4, fig.width=7}
-bind_rows(
-  wts |>
-    pivot_longer(-1, names_to = "t", values_to = "value") |>
-    mutate(move = rep(0:7, 3), method = "TD(0)"),
-  wts_mc |>
-    pivot_longer(-1, names_to = "t", values_to = "value") |>
-    mutate(move = rep(0:7, 3), method = "Monte Carlo")
-) |>
-  ggplot(aes(move, value, color = method)) +
-  geom_line(linewidth = 1, alpha = 0.8) +
-  geom_point(size = 1.5, alpha = 0.6) +
-  scale_x_continuous(breaks = 0:7) +
-  scale_color_manual(values = c("TD(0)" = "#2166ac", "Monte Carlo" = "#d6604d")) +
-  facet_wrap(~feature, ncol = 1, scales = "free_y") +
-  faceted_quarto +
-  labs(title = "Weight trajectories: TD(0) vs Monte Carlo",
-       color = NULL)
-```
-
-The two methods often end at similar final weights — both are learning from
-the same game — but they take different paths. TD(0) nudges weights at each
-move based on local consistency; Monte Carlo drives every position directly
-toward the same global outcome.
-
----
-
-Now that we have traced the engine's learning process across each move
-of a single game, the next step is to generate a run of games
-sufficient for us to notice that the engine is getting better at chess.

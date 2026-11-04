@@ -3,7 +3,7 @@
 **Activity**: Learning Study
 **Workspace**: Chess Learning
 **Initialized**: September 29, 2026
-**Status**: Active — Session 23; MCTS baseline (runs 30–33) complete — draw collapse confirmed across all four stages (ValueNet-19, ValueNet-768, DualNet, ResNet); MCTS v4 SF teacher (run_id=34) running overnight (game 521+, VALUE_LOSS_WEIGHT=2.0, N_GAMES=800 tranche). lc0 v0.32.1 installed to `C:\lc0\`. Next: human play + public app for MCTS v4.
+**Status**: Active — Session 27; mate-pursuit engine built (`scripts/python/Mate Pursuit/mate_pursuit.py`) with optimistic, robust, and known-line pursuit searches; Shiny play-and-learn app `scripts/r/08_play_engine.R` with drag-and-drop, DB logging, and engine chat (not yet browser-tested). Earlier: MCTS baseline (runs 30–33) showed draw collapse across all four stages. Next: browser-test the app, apply the Features chunk fix in `td_tutorial v2.qmd`, and decide how the robust search ranks openings.
 
 ---
 

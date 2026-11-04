@@ -87,7 +87,7 @@ To start a session:
 
 ---
 
-## Current Architecture (as of Session 25)
+## Current Architecture (as of Session 27)
 
 ### Engine (`scripts/python/Temporal Difference/engine.py`) — v2
 - **14 learnable positional features** (material features removed entirely)
@@ -255,6 +255,7 @@ benchmark will use no move limit — chess rules only via claim_draw=True).
 | `scripts/python/Monte Carlo Tree Search/selfplay_mcts_v4.ipynb` | Stage 5: MCTS + ResNet(768, 5 blocks, 128 filters); AlphaZero architecture; same dual loss; run_id=33. **Session 23:** resignation added; same unpacking fix as v3 |
 | `scripts/python/Monte Carlo Tree Search/stockfish_mcts_v4.ipynb` | **New (Session 23)** — MCTS v4 + Stockfish teacher; ResNet + MCTS vs SF1320; engine positions only in replay buffer; VALUE_LOSS_WEIGHT=2.0; run_id=34+ |
 | `scripts/python/Monte Carlo Tree Search/make_sf_mcts_v4.py` | **New (Session 23)** — Generation script for stockfish_mcts_v4.ipynb (archived) |
+| `scripts/python/Mate Pursuit/mate_pursuit.py` | **New (Session 27)** — Mate-pursuit engine: threat search with evaluation fallback (`choose_move`), `greedy_move`, optimistic mate search (`find_mate`), robust search (`robust_choice`, `forced_mate`), known-line pursuit (`root_mate_lines`, `choose_pursuit`, `advance_state`), `play_vs_random` |
 | `scripts/python/Monte Carlo Tree Search/engine_nn_v2.py` | **New (Session 21)** — Stage 2–5 engine: `board_to_tensor` (768-dim bitboard), `MCTSNode`, `mcts_search`, `ValueNet` (Stages 2–3), `DualNet` (Stage 4), `ResNet` (Stage 5); all 13 tests passing |
 | `scripts/python/Monte Carlo Tree Search/update_v2_notebooks.py` | Utility: patches v2 notebooks with AlphaZero improvements |
 | `scripts/python/Temporal Difference/selfplay_td0.ipynb` | TD(0) self-play training; epsilon-greedy; v2 engine; current runs: 18 |
@@ -278,6 +279,7 @@ benchmark will use no move limit — chess rules only via claim_draw=True).
 | `scripts/r/05_stockfish_benchmark.R` | Parameterized script — run ELO benchmark vs Stockfish; designed to run as a background job. Config includes `ENGINE_MODULE` parameter (`"engine"` for runs 1–19, `"engine_learnable_material"` for run 20+, `"engine_nn"` for runs 24–26, `"engine_nn_v2"` for Stage 2–5 runs). **Session 17:** 80 half-move limit removed. **Session 21:** logs `seed_run_id`/`seed_game_number`; tries `nn_sf_run_*` checkpoint naming before `nn_run_*`. **Session 23:** added `engine_nn_v2` branch with `N_SIMULATIONS` config; searches `mcts_v*_run_*.pt` and `mcts_sf_v*_run_*.pt` naming |
 | `scripts/r/ch08_blackjack.R` | **New (Session 23)** — R code from Rodriguez & Mendes (2018) Ch. 8; dealer hand simulations for Tables 8.1, 8.2, 8.4 |
 | `scripts/r/ch08_blackjack.qmd` | **New (Session 23)** — Quarto version of ch08_blackjack.R with explanatory prose, comparison table, and Exercise 13 |
+| `scripts/r/08_play_engine.R` | **New (Session 27)** — Shiny app to play engines: picker for known-line pursuit, robust, optimistic, mate-pursuit, and TD-greedy; source run from learnable-material runs 20/21; TD(0) update and logging to new runs (`engine_version = mate_pursuit_v1`, notes start "Human play"); chessboard.js drag-and-drop; templated engine chat |
 | `scripts/r/seed_supabase.R` | **New (Session 18)** — one-time seeding script: creates `nn_models` table in Supabase; seeds run_id=2 (learnable material from local run_id=21) and run_id=3 (NN from local run_id=24); safe to re-run |
 | `scripts/r/05_search_explorer.R` | Shiny app — interactive move scorer; navigate positions, compare move rankings by depth |
 | `scripts/r/06_search_mechanics.R` | Step-by-step walkthrough: board evaluation feature-by-feature, negamax depth-by-depth |

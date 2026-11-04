@@ -2,7 +2,38 @@
 
 ---
 
-## Session 26 — October 26, 2026
+## Session 27 — November 3, 2026
+
+**Key findings**
+- Mate-in-1 rollout ranking is guaranteed by the terminal check, so it says little about rollouts. Mate-in-2 rollouts (40 playouts per move) ranked the forced mate first in 4 of 8 positions, within noise.
+- Random play: 40 of 300 games ended in checkmate, 80% of games had at least one mate-in-1 position, and checkmate games had a median of 158 plies.
+- Optimistic search (7 plies) finds cooperative mates from the start: 1.Nh3 f6 2.e3 g5 3.Qh5# and 1.e4 f6 2.d4 g5 3.Qh5#. It picks Nh3 by move order.
+- Robust search (forced sub-search, 3 plies after each reply) picks 3.Qh5 after 2...Nc6 (0.786 of replies keep a forced mate). From the start no move scores above zero, so it plays randomly. It takes about 50 s per move in that position.
+- Known-mate-line pursuit: in a scripted game where Black played f6 and g5, the engine opened 1.g3 and reached 3.Qh5#.
+
+**New scripts and apps**
+- `scripts/python/Mate Pursuit/mate_pursuit.py`: threat search and evaluation fallback (`choose_move`), `greedy_move`, optimistic search (`find_mate`), robust search (`robust_choice`, `forced_mate`), known-line pursuit (`root_mate_lines`, `choose_pursuit`, `advance_state`), and `play_vs_random`.
+- `scripts/r/08_play_engine.R`: Shiny app with engine picker (pursuit, robust, optimistic, mate-pursuit, TD-greedy), source-run and checkpoint selection (learnable-material runs 20 and 21), TD(0) update and game logging to new runs (`engine_version = mate_pursuit_v1`, notes start "Human play"), chessboard.js drag-and-drop with move validation, a move dropdown, and a templated engine chat.
+
+**Bugs fixed**
+- Source-run filter matched on `material_queen` and so offered MCTS and neural-net runs. It now selects learnable-material notes only.
+- `py_len()` on a converted R list raised an error. Replaced with `length()`.
+- A shared node budget across root moves starved later candidates, and a budget overrun left the board corrupted. Each candidate now gets its own budget and a board copy.
+- Robust sub-searches used optimistic semantics, which gave 1.0 scores to unsound moves. They now use forced semantics.
+- File-lock errors during editing left `08_play_engine.R` partly corrupted. Repaired and checked with `parse()`.
+
+**Not done**
+- The Features chunk in `td_tutorial v2.qmd` still fails (`starts_with("f")` matches `feature_name`). The fix is not applied.
+- The ply viewer and the GUI (drag-and-drop, chat) have not been checked in a browser.
+- The robust search is too slow for the GUI, and its 5-ply horizon cannot see the 7-ply Scholar's Mate from the start.
+- The optimistic search prefers cooperative mates, and the pursuit engine's opening is a random pick among the shortest mate lines.
+- Lichess bot deployment and a small LLM for chat were discussed, not built.
+
+**Steps for next session**
+1. Stop the "Play engine" background job and relaunch it. Test drag-and-drop, the chat, and the pursuit engine in a browser.
+2. Apply the Features chunk fix in `td_tutorial v2.qmd`.
+3. Decide how the robust search should rank opening moves and whether to extend its horizon to 7 plies.
+4. Review games logged from the GUI in the database.
 
 ### Topic: `center_control` Feature Mechanics (td_tutorial v2.qmd)
 

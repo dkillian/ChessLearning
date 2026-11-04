@@ -137,7 +137,42 @@ git push
 
 ---
 
+## Session 27 — November 3, 2026
+
+### Context
+
+Built the mate-pursuit engine and a Shiny app for playing and learning with it. The commit staged only this session's files. It leaves out an untracked PDF in `background/` and `__pycache__` output, which should not be tracked.
+
+### What was committed
+
+- `scripts/python/Mate Pursuit/mate_pursuit.py` (new)
+- `scripts/r/08_play_engine.R` (new)
+- `scripts/r/td_tutorial v2.qmd` (ply viewer added; Features chunk fix not yet applied)
+- `ChessLearningLog.md`, `ChessLearningDocumentation.md`, `AGENTS.md`, `GitLog.md`
+
+### Issues
+
+- Edits to `08_play_engine.R` failed twice with file-lock errors. One failure left the file partly corrupted. It was repaired and checked with `parse()` before committing.
+
+---
+
 ## Commit History
+
+| Hash | Date | Message |
+|---|---|---|
+| (this commit) | 2026-11-03 | Session 27: mate-pursuit engine, play-and-learn Shiny app, tutorial ply viewer |
+| `ce5e426` | 2026-10-07 | Session 10: softmax notebook, Stockfish integration, game viewer analysis panel, 6 new R scripts (post-filter-branch SHA) |
+| TBD | 2026-10-07 | Session 11: engine.py 14 features, softmax bug fixes, doc update, run_id=14 config |
+| `b3d9470` | earlier | Initial commit |
+| TBD | 2026-10-13 | Session 18: neural net engine condition, NN human play support, ELO viz, public app multi-condition deployment |
+| TBD | 2026-10-14 | Session 19: fix public app game-start crash; add tryCatch to all DB calls; redeploy |
+| TBD | 2026-10-15 | Session 20: past-checkpoint opponent mechanism; doc updates; run_id=24 self-play collapse diagnosed |
+
+*(Intermediate "d" commits were rewritten by filter-branch and their SHAs changed.)*
+
+---
+
+## Commit History (older table rows follow the new entry above)
 
 | Hash | Date | Message |
 |---|---|---|
