@@ -1,6 +1,6 @@
 ---
 title: "How the Chess Engine Learns"
-subtitle: "A step-by-step walkthrough of one self-play game and its weight update"
+subtitle: "An illustration of temporal difference (TD) learning"
 author: "Dan Killian, with Posit AI"
 date: today
 format:
@@ -107,31 +107,114 @@ render_ply <- function(board, feat_col, wt_col, feats_df = feats, wts_df = wts) 
     )
   )
 }
+
+# render_ply_table: board SVG beside a table of feature values and weights at a given ply
+render_ply_table <- function(board, feat_col, wt_col, feats_df = sch, wts_df = sch) {
+  tbl <- tibble(
+    Feature = feats_df$feature,
+    Value   = round(as.numeric(feats_df[[feat_col]]), 3),
+    Weight  = round(as.numeric(wts_df[[wt_col]]), 4)
+  )
+  ft <- flextable::flextable(tbl) |>
+    flextable::autofit()
+
+  htmltools::div(
+    style = "display:flex; gap:20px; align-items:center; margin:16px 0 28px;",
+    htmltools::div(
+      style = "flex: 0 0 220px;",
+      htmltools::HTML(chess_svg$board(board, size = 220L))
+    ),
+    htmltools::div(
+      style = "flex: 1; min-width: 0;",
+      flextable::htmltools_value(ft)
+    )
+  )
+}
+# Per-ply overall score, white's perspective (uses the previous ply's weights)
+ply_scores <- function(k) {
+  vapply(0:k, function(j) {
+    if (j == 0) return(0)
+    raw <- sum(as.numeric(sch[[paste0("f", j)]]) * as.numeric(sch[[paste0("w", j - 1)]]))
+    if (j %% 2 == 1) -raw else raw
+  }, numeric(1))
+}
+
+# Overall score trajectory up to ply k, with a marker at ply k
+score_so_far_img <- function(k) {
+  d <- tibble(ply = 0:k, score = ply_scores(k))
+  p <- ggplot(d, aes(ply, score)) +
+    geom_hline(yintercept = 0, color = "grey60") +
+    geom_line(color = "#AE7C50", linewidth = 0.8) +
+    geom_point(color = "#AE7C50", size = 1.5) +
+    geom_vline(xintercept = k, color = "dodgerblue2", linetype = "dashed") +
+    scale_x_continuous(breaks = 0:7, limits = c(0, 7)) +
+    scale_y_continuous(limits = c(-.02, .02)) +
+    labs(x = "Ply", y = "Score", title = "Overall score so far") +
+    base_quarto
+  f <- tempfile(fileext = ".svg")
+  ggsave(f, p, device = "svg", width = 6, height = 3)
+  htmltools::tags$img(src = knitr::image_uri(f), style = "width:100%;")
+}
+# Feature values (prefix "f") or weights (prefix "w") up to ply k, faceted by feature
+so_far_facet_img <- function(k, prefix) {
+  cols <- paste0(prefix, 0:k)
+  d <- sch |>
+    select(feature, all_of(cols)) |>
+    pivot_longer(-feature, names_to = "ply", values_to = "val") |>
+    mutate(ply = as.integer(gsub("[fw]", "", ply)))
+  ylab <- if (prefix == "f") "Feature value" else "Weight"
+  ttl  <- if (prefix == "f") "Feature values so far" else "Weights so far"
+  p <- ggplot(d, aes(ply, val)) +
+    geom_hline(yintercept = 0, color = "grey60") +
+    geom_line(color = "#8B4513", linewidth = 0.8) +
+    geom_point(color = "#8B4513", size = 1.5) +
+    geom_vline(xintercept = k, color = "dodgerblue2", linetype = "dashed") +
+    facet_wrap(~feature, nrow = 1, scales = "free_y") +
+    scale_x_continuous(breaks = 0:7, limits = c(0, 7)) +
+    labs(x = "Ply", y = ylab, title = ttl) +
+    base_quarto +
+    theme(panel.border = element_rect(color = "grey40", fill = NA, linewidth = 0.5))
+  f <- tempfile(fileext = ".svg")
+  ggsave(f, p, device = "svg", width = 9, height = 2.6)
+  htmltools::tags$img(src = knitr::image_uri(f), style = "width:100%;")
+}
 ```
 
 ## Overview
 
-This document walks through the engine's learning process in detail,
-using a single short chess game as a concrete example. By the end you
-should understand:
+We are interested in the use of reinforcement learning in machine learning. We will use the problem of learning how to play chess as a guiding example. This document walks through the engine's learning process in detail,
+using a single short chess game as a concrete example. By the end you should understand:
 
-- What a **weight** is and what it represents
-- How the engine **evaluates** a board position using those weights
-- How a game's result is used to **update** the weights via temporal
-  difference learning
-- Why some concepts (like queen value) are learned faster than others
+- How the Temporal Difference (TD) learning algorithm works
+- How a simple chess engine can use Temporal Difference learning to get better as more games are played
+
+## Temporal difference learning
+
+Temporal difference (TD) learning improves a prediction by comparing it with a later prediction of the same quantity. Here the quantity is the engine's score for a board position. The engine does not wait for the
+game to end before it adjusts anything. After each move, it compares its score for the position it just left with its score for the position that follows, and it changes the weights to reduce the gap.
+
+Scholar's Mate shows the idea in miniature. The engine scores each of the eight positions in the game, from the starting position through 4.Qxf7#. Only the final position has a known result, because the game is over. Every earlier position is trained toward the engine's own estimate of the position after it. Because the side to move alternates, that estimate is negated before it becomes the target.
+
+For a position $s_t$ with a successor $s_{t+1}$, the target and error are
+
+$$\text{target}_t = -V(s_{t+1}), \qquad \delta_t = \text{target}_t - V(s_t)$$
+
+and each weight moves in proportion to the error and the feature value:
+
+$$w_i \leftarrow w_i + \alpha \, \delta_t \, x_{t,i}$$
+
+Here $\alpha$ is the learning rate and $x_{t,i}$ is feature $i$ in position $t$. The final position uses the actual game result as its target instead of a successor estimate.
+
+Learning this way means a result at the end of a game can influence positions earlier in the game, one step at a time. Over many games, that backward flow of information is what allows the weights to reflect which
+features tend to lead to wins.
 
 ## Game
 
-We'll use Scholar's Mate — a four-move checkmate — as our example. It's
-short enough to trace every step, and it has a decisive result (white
-wins), which produces a clear learning signal.
+We'll use Scholar's Mate — a four-move checkmate — as our example. It's short enough to trace every step, and it has a decisive result (white wins), which produces a clear learning signal.
 
 The moves are: **1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6?? 4. Qxf7#**
 
-White wins by exploiting the weakness of black's f7 square. King safety
-is the critical factor in this game — the engine should learn that from
-these four positions.
+White wins by exploiting the weakness of black's f7 square. King safety is the critical factor in this game — the engine should learn that from these four positions.
 
 ```{r import-game, include=FALSE}
 embed_url <- "https://lichess.org/embed/game/9VP5REFK?theme=auto&bg=auto"
@@ -148,25 +231,13 @@ htmltools::tags$iframe(
 
 ## Evaluation
 
-The engine knows nothing about chess strategy on its own. It knows the
-rules of the game and a handful of features of any board position. The
-engine then combines the board features into a single score using a
-weighted sum:
+The engine knows nothing about chess strategy on its own. It knows the rules of the game, piece values, and a set of 14 measurable and learnable features of any board position. At each move, the engine scores the position against each one of the 14 measurable features. The engine then generates an overall position score by taking the sum of the feature score times its weight:
 
 $$\text{score} = w_1 \times feature_1 + w_2 \times feature_2 + \cdots + w_n \times feature_n$$
 
-The board features and how they are scored are fixed. What changes are
-the weights, which update after each move and in response to the game
-outcome. After lots of games, the weights should come to reflect the
-true value of each board feature in the game of chess. As the engine's
-weights get closer to each feature's true value in the game of chess,
-its ability to play the game of chess improves.
+The board features and how they are scored are fixed. What changes are the weights, which update after each move and in response to the game outcome. After lots of games, the weights should come to reflect the true value of each board feature in the game of chess. As the engine's weights get closer to each feature's true value in the game of chess, its ability to play the game of chess improves.
 
-A positive score means the position looks good for the side to move;
-negative means it looks bad. After white moves, the evaluation score is
-from black's perspective.
-
-Let's learn from this game. First, we set the engine.
+A positive score means the position looks good for the side to move; negative means it looks bad. After white moves, the evaluation score is from black's perspective.
 
 Let's start an object to collect the feature values at each half-move
 ('ply')
@@ -248,8 +319,6 @@ feats %>%
     fmt_feats()
 ```
 
-The starting weight values are just randomly seeded to jumpstart the learning process. 
-
 For Scholar's Mate, the most meaningful features the engine can learn from are center control, king safety, and piece development. Our features table will be trimmed to just these three.
 
 ```{r}
@@ -288,17 +357,10 @@ We've set the initial feature values, the initial weights, and the initial score
 
 We will now set up a board, make a move, and do the following: 
 
-- Update the feature values
-- Calculate evaluation score
-
-
-(1) update the feature
-values, 
-(2) calculate the evaluation score based on the updated feature
+(1) Update the feature values, 
+(2) Calculate the evaluation score based on the updated feature
 values and the weights from the previous move, and 
-(3) update the
-weights using the evaluation score, the error, the learning rate, and
-the weights from the previous move.
+(3) Update the weights using the evaluation score, the error, the learning rate, and the weights from the previous move.
 
 Each move section ends with a panel showing the board alongside a
 diverging bar chart of **feature values**, **weights**, and
@@ -356,7 +418,7 @@ sch %>%
 After e4, the weights on central control and piece development slightly increased.
 
 ```{r}
-htmltools::tagList(render_ply(b, "f1", "w1", feats_df = sch, wts_df = sch))
+htmltools::tagList(render_ply_table(b, "f1", "w1"), score_so_far_img(1), so_far_facet_img(1, "f"), so_far_facet_img(1, "w"))
 ```
 
 ### 1. ... e5
@@ -391,11 +453,10 @@ sch %>%
     fmt_feats()
 ```
 
-The feature values were all zero, so the weights do not change for this
-update.
+The feature values were all zero, so the weights do not change for this update.
 
 ```{r}
-htmltools::tagList(render_ply(b, "f2", "w2", feats_df = sch, wts_df = sch))
+htmltools::tagList(render_ply_table(b, "f2", "w2"), score_so_far_img(2), so_far_facet_img(2, "f"), so_far_facet_img(2, "w"))
 ```
 
 ### 2. Bc4
@@ -431,7 +492,7 @@ sch %>%
 The weight on king safety slightly increased.
 
 ```{r}
-htmltools::tagList(render_ply(b, "f3", "w3", feats_df = sch, wts_df = sch))
+htmltools::tagList(render_ply_table(b, "f3", "w3"), score_so_far_img(3), so_far_facet_img(3, "f"), so_far_facet_img(3, "w"))
 ```
 
 ### 2. ... Nc6
@@ -474,7 +535,7 @@ with losing. The engine needs lots of games to learn that center control
 is correlated with winning.
 
 ```{r}
-htmltools::tagList(render_ply(b, "f4", "w4", feats_df = sch, wts_df = sch))
+htmltools::tagList(render_ply_table(b, "f4", "w4"), score_so_far_img(4), so_far_facet_img(4, "f"), so_far_facet_img(4, "w"))
 ```
 
 ### 3. Qh5
@@ -508,7 +569,7 @@ sch %>%
 The weight for king safety increases.
 
 ```{r}
-htmltools::tagList(render_ply(b, "f5", "w5", feats_df = sch, wts_df = sch))
+htmltools::tagList(render_ply_table(b, "f5", "w5"), score_so_far_img(5), so_far_facet_img(5, "f"), so_far_facet_img(5, "w"))
 ```
 
 ### 3. ... Nf6
@@ -545,7 +606,7 @@ Same trend — stronger negative weight for center control and stronger
 positive weight for king safety.
 
 ```{r}
-htmltools::tagList(render_ply(b, "f6", "w6", feats_df = sch, wts_df = sch))
+htmltools::tagList(render_ply_table(b, "f6", "w6"), score_so_far_img(6), so_far_facet_img(6, "f"), so_far_facet_img(6, "w"))
 ```
 
 ### 4. Qxf7# 
@@ -594,7 +655,7 @@ It's unclear whether a run of Scholar's Mate games would correct the
 engine's mistaken impression that center control is bad.
 
 ```{r}
-htmltools::tagList(render_ply(b, "f7", "w7", feats_df = sch, wts_df = sch))
+htmltools::tagList(render_ply_table(b, "f7", "w7"), score_so_far_img(7), so_far_facet_img(7, "f"), so_far_facet_img(7, "w"))
 ```
 
 ## Review 
@@ -619,7 +680,7 @@ traj <- tibble(
 ) |>
   # Convert to white's perspective: negate when it's black to move
   mutate(
-    white_adv = if_else(to_move == "White", raw_score, -raw_score),
+    score = if_else(to_move == "White", raw_score, -raw_score),
     label     = factor(label, levels = label)
   )
 traj %>%
@@ -627,22 +688,25 @@ traj %>%
 ```
 
 ```{r}
-ggplot(traj, aes(x = label, y = white_adv, group = 1)) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "grey60",
-             linewidth = 0.5) +
-  geom_line(linewidth = 0.8, color = "grey40") +
-  geom_point(aes(color = to_move), size = 3.5) +
-  scale_color_manual(values = c("White" = "#8B4513", "Black" = "#D2B48C")) +
-  annotate("text", x = 8.3, y = 0.05, label = "+1 (white wins)",
-           hjust = 0, size = 3, color = "grey40") +
-  labs(
-    title  = "Evaluation throughout the game",
-    subtitle = "White's advantage — positive means white is better",
-    x      = NULL,
-    y      = "White's advantage",
-    color  = "To move"
-  ) +
-  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+# Dense grid so the shading meets the line at its zero crossings
+shade_df <- tibble(ply = seq(0, 7, by = 0.01)) |>
+  mutate(score = approx(traj$ply, traj$score, xout = ply)$y)
+
+ggplot(traj, aes(x = ply, y = score)) +
+  # Light grey below zero (black ahead), white above zero (white ahead)
+  geom_ribbon(data = shade_df, aes(x = ply, ymin = pmin(score, 0), ymax = 0),
+              fill = "#D9D9D9", alpha = 1, inherit.aes = FALSE) +
+  geom_ribbon(data = shade_df, aes(x = ply, ymin = 0, ymax = pmax(score, 0)),
+              fill = "white", alpha = 1, inherit.aes = FALSE) +
+  geom_hline(yintercept = 0, color = "grey50", linewidth = 1, alpha = .5) +
+  geom_line(linewidth = 0.8, color = "#AE7C50") +
+  scale_x_continuous(breaks = traj$ply, labels = as.character(traj$label)) +
+  scale_y_continuous(limits = c(-.02, .02)) +
+  labs(title = "Game evaluation", x = NULL, y = "Score") +
+  theme(panel.background = element_rect(fill = "#F2F2F2", color = NA),
+        panel.grid = element_line(color = "dodgerblue2", linetype = "dotted"),
+        axis.text.x = element_text(angle = 40, hjust = 1),
+        axis.title.y = element_text(angle = 0, vjust = .5))
 ```
 
 ### Features
@@ -680,14 +744,16 @@ ggplot(wtsL, aes(move, value, color=feature)) +
     geom_line(linewidth=1, alpha=.8) +
     scale_color_viridis_d() +
     scale_x_continuous(breaks=0:7) +
-    facet_wrap(~feature, ncol=1, scales="free_y") +
+    facet_wrap(~feature, ncol=3, scales="free_y") +
     faceted_quarto +
-    labs(title="Weights by move")
+    labs(title="Weights by move",
+         x="ply") +
+    theme(legend.position = "none")
 ```
 
 ## Interactive walkthrough
 
-Step through the game with the buttons or slider. Each position shows the board alongside the feature values, weights, and contributions for that ply.
+Step through the game with the buttons or slider. Each position shows the board with trajectory plots for feature values, weights, and the overall score across the full game. A dashed line marks the current ply.
 
 ```{r ply-viewer, include=TRUE}
 # Replay the game to build a board for each ply
@@ -702,12 +768,72 @@ for (i in seq_along(sans)) {
   ply_boards[[i + 1]] <- game_board$copy()
 }
 
+# Long format of feature values (f) and weights (w) by ply
+sch_long <- sch |>
+  pivot_longer(
+    cols = matches("^[fw][0-9]+$"),
+    names_to = c(".value", "ply"),
+    names_pattern = "^([fw])([0-9]+)$"
+  ) |>
+  mutate(ply = as.integer(ply)) |>
+  select(feature_name, feature, ply, f, w)
+
+# Trajectory plots for the full game, with a marker at the current ply
+traj_plot <- function(k, metric) {
+  marker <- geom_vline(xintercept = k, color = "dodgerblue2", linetype = "dashed")
+  if (metric == "features") {
+    p <- ggplot(sch_long, aes(ply, f)) +
+      geom_hline(yintercept = 0, color = "grey60") +
+      geom_line(color = "#8B4513", linewidth = 0.8) +
+      geom_point(color = "#8B4513", size = 1.5) +
+      facet_wrap(~feature, nrow = 1, scales = "free_y") +
+      labs(x = "Ply", y = "Feature value", title = "Feature values")
+  } else if (metric == "weights") {
+    p <- ggplot(sch_long, aes(ply, w)) +
+      geom_hline(yintercept = 0, color = "grey60") +
+      geom_line(color = "#8B4513", linewidth = 0.8) +
+      geom_point(color = "#8B4513", size = 1.5) +
+      facet_wrap(~feature, nrow = 1, scales = "free_y") +
+      labs(x = "Ply", y = "Weight", title = "Weights")
+  } else {
+    p <- ggplot(traj, aes(ply, score)) +
+      geom_hline(yintercept = 0, color = "grey60") +
+      geom_line(color = "#AE7C50", linewidth = 0.8) +
+      geom_point(color = "#AE7C50", size = 1.5) +
+      scale_y_continuous(limits = c(-.02, .02)) +
+      labs(x = "Ply", y = "Score", title = "Overall score") +
+      faceted
+  }
+  p <- p + marker + scale_x_continuous(breaks = 0:7) + base_quarto
+  # Border around each facet panel
+  if (metric != "score") {
+    p <- p + theme(panel.border = element_rect(color = "grey40", fill = NA, linewidth = 0.5))
+  }
+  p
+}
+
+# Embed a trajectory plot as an inline SVG image
+traj_img <- function(k, metric, width, height) {
+  f <- tempfile(fileext = ".svg")
+  ggsave(f, traj_plot(k, metric), device = "svg", width = width, height = height)
+  htmltools::tags$img(src = knitr::image_uri(f), style = "width:100%;")
+}
+
 ply_panels <- lapply(seq_along(ply_boards) - 1, function(k) {
   htmltools::div(
     class = "ply-panel",
     style = if (k == 0) "display:block;" else "display:none;",
-    render_ply(ply_boards[[k + 1]], paste0("f", k), paste0("w", k),
-               feats_df = sch, wts_df = sch)
+    htmltools::div(
+      style = "display:flex; gap:20px; align-items:center; margin:16px 0;",
+      htmltools::div(
+        style = "flex: 0 0 220px;",
+        htmltools::HTML(chess_svg$board(ply_boards[[k + 1]], size = 220L))
+      ),
+      htmltools::div(style = "flex: 1; min-width: 0;",
+                     traj_img(k, "score", 6, 3.5))
+    ),
+    traj_img(k, "features", 9, 2.8),
+    traj_img(k, "weights", 9, 2.8)
   )
 })
 
@@ -744,4 +870,9 @@ htmltools::tagList(
 )
 ```
 
+## Conclusion
+
+We created a simple chess engine that knew the rules of the game, the piece values, and a set of 14 measurable and learnable features. After randomly initiating weights on the feature values, we updated our feature scores and then weights after each move. Our benchmark for updating the weights used the error - the difference between the overall evaluation score at the current move and the overall evaluation score from the previous move. 
+
+We showed how this step by step approach could update the weights as the error term changed each move. We have not yet showed that the engine could get better at chess using the updating of the weights on the feature values. Furthermore, we have not yet shown how the engine can search for and select a chess move. 
 

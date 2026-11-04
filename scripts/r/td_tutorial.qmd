@@ -101,7 +101,7 @@ from black's perspective.
 Let's learn from this game. First, we set the engine.
 
 ```{r engine-setup, include=FALSE}
-engine  <- reticulate::import_from_path("engine", path = "../python")
+engine <- reticulate::import_from_path("engine", path = "../python/Temporal Difference")
 chess_m <- reticulate::import("chess")
 ```
 
