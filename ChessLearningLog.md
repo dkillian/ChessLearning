@@ -2,6 +2,41 @@
 
 ---
 
+## Session 28 — November 4–5, 2026
+
+**Key findings**
+- Lichess bot runs so far: run 44 logged one game the user won (1-0, mate on move 36, 71 half-moves). Run 47 logged one game the bot won (0-1). Runs 45 and 46 have no finished games. Two games are too few to say anything about learning.
+- HTTP 429 errors on the event stream appeared while two bot processes shared one token. After the older process was stopped, 429s continued, and the backoff reached 240 s. A direct `/api/account` request returned 200, so the token itself works.
+- qwen2.5:3b (pulled through Ollama) wrote usable narration when given computed facts. It misread a raw FEN and inverted the sign of the engine value, so the facts now carry a plain-language assessment. It tends to restate the situation rather than answer a direct question.
+
+**New scripts and files**
+- `scripts/python/Lichess Bot/lichess_nn_bot.py`: Lichess Bot API client for the NN engine. Adds incoming acceptance of bot and human challenges, outgoing matchmaking (bots from the online list, humans through an open challenge), slot reservation (2 concurrent games, 1 reserved for humans), an in-memory daily cap of 100 bot games, backoff on 429, and chat (a greeting, narration every 10 full moves, and an end-of-game learning summary). It also replies to messages in the player room that mention the bot.
+- `scripts/python/Lichess Bot/lichess_chat.py`: Ollama client for qwen2.5:3b, with blocked-term filtering, a 140-character cap, prompt builders, and position facts.
+- `start_lichess_bot.bat`: double-click launcher that checks `LICHESS_BOT_TOKEN` before starting the script.
+
+**Bugs fixed**
+- The event stream reconnected every 5 s after a 429. Backoff now starts at 60 s and doubles up to 600 s.
+- Open challenges failed with `403 Missing scope: challenge:write`. The existing token lacks that scope.
+- Chat posts failed with `400 Must be at most 140 characters long`. Replies are now capped at 140 characters.
+- The LLM misread the engine value sign. The facts now use a plain-language label.
+
+**Not done**
+- Chat, matchmaking, and the backoff have not been tested against the live API after the latest changes. The bot process was not running at session close.
+- A new token with `bot:play` and `challenge:write` is needed.
+- Unverified against the live API: the open-challenge response shape, the cancel endpoint, and the fields returned by the online-bots list. Cancel results are not checked.
+- The end-of-game chat may be rejected once a game has finished. Not tested.
+- The stray `nul` file in the project root cannot be deleted (Windows reserves the name, and deletion was denied). It is gitignored.
+- Commit `6f6b64e` ("d"), made outside this session, included `__pycache__` output, empty `lichess_bot_*.log` files, and two checkpoints (`models/lichess_nn_run_44_game_1.pt`, `models/lichess_nn_run_47_game_1.pt`).
+
+**Steps for next session**
+1. Generate a new Lichess token with `bot:play` and `challenge:write`, set `LICHESS_BOT_TOKEN`, and start the bot with `start_lichess_bot.bat`.
+2. Confirm the 429 errors clear, and that a matchmaking challenge is sent and canceled cleanly.
+3. Play one live game and check that the greeting, midgame narration, and end-of-game post all succeed.
+4. Decide whether the `lichess_nn_run_*.pt` checkpoints belong in git or should be ignored.
+5. Review the run 47 game and its TD update.
+
+---
+
 ## Session 27 — November 3, 2026
 
 **Key findings**

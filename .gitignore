@@ -8,7 +8,7 @@
 data/chess_learning.db
 
 # Python cache
-scripts/python/__pycache__/
+__pycache__/
 
 # Rendered HTML (built from .qmd source)
 scripts/r/*.html
@@ -19,6 +19,9 @@ background/Reinforcement Learning.pdf
 
 # Quarto cache directories
 scripts/r/*_cache/
+
+# Lichess bot runtime logs
+lichess_bot_*.log
 
 # Scratch files
 nul

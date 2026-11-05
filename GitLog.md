@@ -156,6 +156,25 @@ Built the mate-pursuit engine and a Shiny app for playing and learning with it. 
 
 ---
 
+## Session 28 — November 4–5, 2026
+
+### Context
+
+Lichess bot work: matchmaking, a local LLM chat layer, a 429 backoff, and the launcher. A commit titled "d" (`6f6b64e`, 09:44 on Nov 5) was made outside this session and already contained the bot files.
+
+### Issues
+
+- Commit `6f6b64e` tracked `__pycache__/` files (the ignore rule only covered `scripts/python/__pycache__/`), the empty `lichess_bot_stdout.log` and `lichess_bot_stderr.log` files, and two checkpoints (`models/lichess_nn_run_44_game_1.pt`, `models/lichess_nn_run_47_game_1.pt`). The history was left as is.
+- The stray `nul` file in the project root could not be deleted (Windows reserved name). It is gitignored.
+
+### What was committed
+
+- `.gitignore`: ignore `__pycache__/` anywhere, and `lichess_bot_*.log`.
+- `ChessLearningLog.md`, `ChessLearningDocumentation.md`, `AGENTS.md`, `GitLog.md` (Session 28 entry).
+- Untracked (`git rm --cached`): the `__pycache__` files and the two empty log files. The files remain on disk.
+
+---
+
 ## Commit History
 
 | Hash | Date | Message |

@@ -3,7 +3,7 @@
 **Activity**: Learning Study
 **Workspace**: Chess Learning
 **Initialized**: September 29, 2026
-**Status**: Active — Session 27; mate-pursuit engine built (`scripts/python/Mate Pursuit/mate_pursuit.py`) with optimistic, robust, and known-line pursuit searches; Shiny play-and-learn app `scripts/r/08_play_engine.R` with drag-and-drop, DB logging, and engine chat (not yet browser-tested). Earlier: MCTS baseline (runs 30–33) showed draw collapse across all four stages. Next: browser-test the app, apply the Features chunk fix in `td_tutorial v2.qmd`, and decide how the robust search ranks openings.
+**Status**: Active — Session 28; Lichess bot (`scripts/python/Lichess Bot/lichess_nn_bot.py`) runs runs 44–47 with matchmaking and chat, and a local qwen2.5:3b chat layer (`lichess_chat.py`); live testing of chat and matchmaking is pending, and the token needs `challenge:write`. Earlier, session 27: mate-pursuit engine built (`scripts/python/Mate Pursuit/mate_pursuit.py`) with optimistic, robust, and known-line pursuit searches; Shiny play-and-learn app `scripts/r/08_play_engine.R` with drag-and-drop, DB logging, and engine chat (not yet browser-tested). Earlier: MCTS baseline (runs 30–33) showed draw collapse across all four stages. Next: browser-test the app, apply the Features chunk fix in `td_tutorial v2.qmd`, and decide how the robust search ranks openings.
 
 ---
 
@@ -471,6 +471,9 @@ Chess Learning/                                  ← Repo root
 | `scripts/python/Monte Carlo Tree Search/selfplay_mcts_v4.ipynb` | Stage 5 MCTS training: `ResNet(768, n_filters=128, n_blocks=5)`; same dual loss and logging as Stage 4; AlphaZero architecture at small scale; run_id=33+. **Session 23:** resignation added; `_, val_out = net(...)` unpacking fix |
 | `scripts/python/Monte Carlo Tree Search/stockfish_mcts_v4.ipynb` | **New (Session 23)** — MCTS v4 + Stockfish teacher: ResNet + MCTS vs SF1320; engine positions only; dual loss; VALUE_LOSS_WEIGHT=2.0; scheduler.step() inside BATCH_SIZE guard; run_id=34+ |
 | `scripts/python/Monte Carlo Tree Search/make_sf_mcts_v4.py` | **New (Session 23)** — Generation script for stockfish_mcts_v4.ipynb (archived) |
+| `scripts/python/Lichess Bot/lichess_nn_bot.py` | **New (Session 28)** — Lichess Bot API client for the NN engine: challenge handling, matchmaking, slot reservation, daily cap, 429 backoff, chat hooks; logs each finished game to the DB with `engine_version = lichess_nn_v1` |
+| `scripts/python/Lichess Bot/lichess_chat.py` | **New (Session 28)** — Local LLM chat via Ollama (`qwen2.5:3b`); facts-based prompts; guardrails; 140-character cap |
+| `start_lichess_bot.bat` | **New (Session 28)** — Project-root launcher for the Lichess bot |
 | `scripts/r/ch08_blackjack.R` | **New (Session 23)** — R code from Rodriguez & Mendes (2018) Ch. 8; dealer hand simulations Tables 8.1, 8.2, 8.4 |
 | `scripts/r/ch08_blackjack.qmd` | **New (Session 23)** — Quarto version with explanatory prose, comparison table, Exercise 13 |
 | `scripts/python/Temporal Difference/selfplay_softmax.ipynb` | Variant training script: softmax move selection (τ=0.05, top-10 candidates), style modifier presets (neutral/attacking/cautious/reckless/positional). |

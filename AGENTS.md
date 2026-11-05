@@ -84,10 +84,11 @@ To start a session:
 - **Key reference**: McGrath et al. PNAS 2022 — "Acquisition of Chess Knowledge in AlphaZero" — central scientific reference for concept acquisition sequence research
 - **Storage**: SQLite database at `data/chess_learning.db` — 10 tables (runs, games, game_records, weights, weight_deltas, feature_stats, position_logs, baseline_evals, stockfish_evals, stockfish_games); `stockfish_games` created by `05_stockfish_benchmark.R`, not by `setup_database()`. **Session 21:** `games` and `stockfish_games` gained `seed_run_id INTEGER` and `seed_game_number INTEGER` columns to track which checkpoint each game was played against.
 - **Stockfish 19**: installed via winget; used for ELO benchmarking and live game play; minimum `UCI_Elo` = 1320
+- **Lichess bot**: `scripts/python/Lichess Bot/lichess_nn_bot.py`, launched by `start_lichess_bot.bat`; needs `LICHESS_BOT_TOKEN` with `bot:play` and `challenge:write` scopes. Chat uses **Ollama** at `localhost:11434` with `qwen2.5:3b` (installed; `llama3.2:3b` also present; `deepseek-r1:8b` too large for the 4 GB GPU for chat)
 
 ---
 
-## Current Architecture (as of Session 27)
+## Current Architecture (as of Session 28)
 
 ### Engine (`scripts/python/Temporal Difference/engine.py`) — v2
 - **14 learnable positional features** (material features removed entirely)
@@ -151,6 +152,10 @@ Applied to: `king_safety` (× phase), `mobility` (× (0.5+0.5×phase)), `pawn_ad
 | 35 | — | — | **Self-play v2** (`selfplay_mcts_v4.ipynb`); Dirichlet noise (α=0.3, ε=0.25); LR resume fix; TEMP_THRESHOLD=9999 | Not yet run |
 | 36 | 100 | — | **SF teacher v2** (`stockfish_mcts_v4.ipynb`); same fixes as run 35 but with TEMP_THRESHOLD=30 | 0W/0D/100L; attribution near-zero throughout — temperature annealing identified as culprit |
 | 37 | 100 | — | **SF teacher v3** (`stockfish_mcts_v4.ipynb`); Dirichlet noise + LR fix + TEMP_THRESHOLD=9999 (annealing disabled) | 0W/1D/99L; small non-zero attributions (max 0.101 game 10, ~0.001 game 100); no surge yet — extend to 300 games |
+| 44 | 1 | 3 | **Lichess bot** (`lichess_nn_v1`); seeded from run_id=27 game 390; TD(0)+Adam | 1-0 (user won by mate, 71 half-moves) |
+| 45 | 0 | 3 | **Lichess bot** restart | No finished games logged |
+| 46 | 0 | 3 | **Lichess bot** restart | No finished games logged |
+| 47 | 1 | 3 | **Lichess bot** restart | 0-1 (bot won) |
 
 ### engine_nn_v2.py — Stage 2–5 Engine (Session 21)
 
@@ -255,6 +260,9 @@ benchmark will use no move limit — chess rules only via claim_draw=True).
 | `scripts/python/Monte Carlo Tree Search/selfplay_mcts_v4.ipynb` | Stage 5: MCTS + ResNet(768, 5 blocks, 128 filters); AlphaZero architecture; same dual loss; run_id=33. **Session 23:** resignation added; same unpacking fix as v3 |
 | `scripts/python/Monte Carlo Tree Search/stockfish_mcts_v4.ipynb` | **New (Session 23)** — MCTS v4 + Stockfish teacher; ResNet + MCTS vs SF1320; engine positions only in replay buffer; VALUE_LOSS_WEIGHT=2.0; run_id=34+ |
 | `scripts/python/Monte Carlo Tree Search/make_sf_mcts_v4.py` | **New (Session 23)** — Generation script for stockfish_mcts_v4.ipynb (archived) |
+| `scripts/python/Lichess Bot/lichess_nn_bot.py` | **New (Session 28)** — Lichess Bot API client for the NN engine (run from `start_lichess_bot.bat`). Accepts bot and human challenges; outgoing matchmaking (bots via online list, humans via open challenge); 2 concurrent games with 1 reserved for humans; in-memory daily cap of 100 bot games; 429 exponential backoff; chat greeting, midgame narration (every 10 full moves), end-of-game learning summary, and replies to player-room messages that mention the bot. Logs to `runs`, `games`, `game_records`, `weights`, `weight_deltas` with `engine_version = lichess_nn_v1` |
+| `scripts/python/Lichess Bot/lichess_chat.py` | **New (Session 28)** — Ollama client (`qwen2.5:3b`) for bot chat; blocked-term filter; 140-character cap; `position_facts()` (FEN, material, last move, engine assessment label, last-game learning); prompt builders `opening`, `narrate`, `respond` |
+| `start_lichess_bot.bat` | **New (Session 28)** — Project-root launcher; checks `LICHESS_BOT_TOKEN` and runs `lichess_nn_bot.py` |
 | `scripts/python/Mate Pursuit/mate_pursuit.py` | **New (Session 27)** — Mate-pursuit engine: threat search with evaluation fallback (`choose_move`), `greedy_move`, optimistic mate search (`find_mate`), robust search (`robust_choice`, `forced_mate`), known-line pursuit (`root_mate_lines`, `choose_pursuit`, `advance_state`), `play_vs_random` |
 | `scripts/python/Monte Carlo Tree Search/engine_nn_v2.py` | **New (Session 21)** — Stage 2–5 engine: `board_to_tensor` (768-dim bitboard), `MCTSNode`, `mcts_search`, `ValueNet` (Stages 2–3), `DualNet` (Stage 4), `ResNet` (Stage 5); all 13 tests passing |
 | `scripts/python/Monte Carlo Tree Search/update_v2_notebooks.py` | Utility: patches v2 notebooks with AlphaZero improvements |
